@@ -1,0 +1,35 @@
+Device Inventory
+GET https://graph.microsoft.com/beta/deviceManagement/managedDevices('7e09b623-7163-4a8d-8bc6-d7295cd1bd9b')/deviceInventories
+
+
+Discovered Apps
+GET https://graph.microsoft.com/beta/deviceManagement/manageddevices('7e09b623-7163-4a8d-8bc6-d7295cd1bd9b')/detectedApps?$top=50&$orderBy=displayName%20asc
+
+
+Device Configuration
+POST https://graph.microsoft.com/beta/deviceManagement/reports/getConfigurationPoliciesReportForDevice
+
+
+Device Compliance
+POST https://graph.microsoft.com/beta/deviceManagement/reports/getDevicePoliciesComplianceReport
+
+
+Group Membership
+GET https://graph.microsoft.com/beta/devices?$filter=deviceId%20eq%20%27a281f9fa-9df1-411a-9fe9-c4c82263d2a7%27
+GET https://graph.microsoft.com/beta/devices/d0dea08a-c9ed-4031-9448-f040adf70a7d/transitiveMemberOf/microsoft.graph.group?$orderBy=displayName%20asc&$count=true
+GET https://graph.microsoft.com/beta/devices/d0dea08a-c9ed-4031-9448-f040adf70a7d/memberOf/microsoft.graph.group?$orderBy=displayName%20asc&$count=true
+
+
+Managed Apps
+GET https://graph.microsoft.com/beta/deviceManagement/managedDevices('7e09b623-7163-4a8d-8bc6-d7295cd1bd9b')/users?$select=id,displayName
+GET https://graph.microsoft.com/beta/deviceManagement/managedDevices('7e09b623-7163-4a8d-8bc6-d7295cd1bd9b')
+GET https://graph.microsoft.com/beta/users('c257024d-1e03-42cd-8df9-8793d025b8df')
+GET https://graph.microsoft.com/beta/users('c257024d-1e03-42cd-8df9-8793d025b8df')/mobileAppIntentAndStates('7e09b623-7163-4a8d-8bc6-d7295cd1bd9b')
+
+
+Enrollment
+POST https://graph.microsoft.com/beta/deviceManagement/reports/getEnrollmentConfigurationPoliciesByDevice
+
+
+Remediaitons
+GET https://graph.microsoft.com/beta/deviceManagement/managedDevices/7e09b623-7163-4a8d-8bc6-d7295cd1bd9b/deviceHealthScriptStates?

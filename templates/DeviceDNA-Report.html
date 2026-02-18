@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' cdn.sheetjs.com; connect-src 'self' cdn.sheetjs.com;">
+    <title>DeviceDNA Report</title>
+    <style>
+/* CSS extracted from modules/Reporting.ps1 - Get-DeviceDNACSS function */
+/* Include extracted-css.css content here */
+/* For now, we'll load it externally in development */
+    </style>
+    <link rel="stylesheet" href="extracted-css.css">
+</head>
+<body>
+    <!-- Loading indicator -->
+    <div id="loading-screen" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #fff; display: flex; align-items: center; justify-content: center; z-index: 10000;">
+        <div style="text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 20px;">🧬</div>
+            <h2 style="margin: 0 0 10px 0; color: #333;">Loading DeviceDNA Report...</h2>
+            <p id="loading-status" style="color: #666;">Initializing...</p>
+        </div>
+    </div>
+
+    <!-- Data Container (will be populated by JavaScript) -->
+    <script type="application/json" id="policy-data">
+    {
+        "deviceInfo": {},
+        "summary": {},
+        "intune": {},
+        "groupPolicy": {},
+        "sccm": {},
+        "windowsUpdate": {},
+        "collectionIssues": []
+    }
+    </script>
+
+    <!-- Sticky Navigation -->
+    <nav class="sticky-nav">
+        <div class="nav-container">
+            <div class="nav-top">
+                <a href="#" class="nav-brand" onclick="window.scrollTo({top:0,behavior:'smooth'});return false;">
+                    <span class="nav-brand-icon">&#129516;</span>
+                    <span>DeviceDNA</span>
+                </a>
+
+                <div class="nav-search">
+                    <label for="nav-search" class="sr-only">Global search</label>
+                    <input type="text" id="nav-search" placeholder="Search policies, apps, groups..." aria-label="Global search">
+                </div>
+
+                <div class="nav-filters">
+                    <button id="filter-all" class="filter-btn active">All</button>
+                    <button id="filter-issues" class="filter-btn filter-issues">Issues</button>
+                    <button id="filter-warnings" class="filter-btn filter-warnings">Warnings</button>
+                </div>
+
+                <button id="mobile-menu-toggle" class="mobile-menu-toggle" aria-label="Toggle navigation menu">&#9776;</button>
+            </div>
+
+            <div class="tab-bar" role="tablist" aria-label="Report sections">
+                <button class="tab-btn active" data-tab="overview" role="tab" aria-selected="true" tabindex="0">
+                    <span class="tab-icon">&#128202;</span>
+                    <span class="tab-label">Overview</span>
+                    <span class="tab-badge" style="display:none"></span>
+                    <span class="tab-status-dot"></span>
+                </button>
+                <button class="tab-btn" data-tab="gp" role="tab" aria-selected="false" tabindex="-1">
+                    <span class="tab-icon">&#128187;</span>
+                    <span class="tab-label">Group Policy</span>
+                    <span class="tab-badge" style="display:none"></span>
+                    <span class="tab-status-dot"></span>
+                </button>
+                <button class="tab-btn" data-tab="intune" role="tab" aria-selected="false" tabindex="-1">
+                    <span class="tab-icon">&#9881;&#65039;</span>
+                    <span class="tab-label">Intune</span>
+                    <span class="tab-badge" style="display:none"></span>
+                    <span class="tab-status-dot"></span>
+                </button>
+                <button class="tab-btn" data-tab="sccm" role="tab" aria-selected="false" tabindex="-1">
+                    <span class="tab-icon">&#9881;</span>
+                    <span class="tab-label">SCCM</span>
+                    <span class="tab-badge" style="display:none"></span>
+                    <span class="tab-status-dot"></span>
+                </button>
+                <button class="tab-btn" data-tab="wu" role="tab" aria-selected="false" tabindex="-1">
+                    <span class="tab-icon">&#128260;</span>
+                    <span class="tab-label">Windows Updates</span>
+                    <span class="tab-badge" style="display:none"></span>
+                    <span class="tab-status-dot"></span>
+                </button>
+                <button class="tab-btn" data-tab="device" role="tab" aria-selected="false" tabindex="-1">
+                    <span class="tab-icon">&#128225;</span>
+                    <span class="tab-label">Device</span>
+                    <span class="tab-badge" style="display:none"></span>
+                    <span class="tab-status-dot"></span>
+                </button>
+            </div>
+
+            <!-- Mobile tab selector -->
+            <select id="tab-mobile-select" class="tab-mobile-select" aria-label="Select report section">
+                <option value="overview">Overview</option>
+                <option value="gp">Group Policy</option>
+                <option value="intune">Intune</option>
+                <option value="sccm">SCCM</option>
+                <option value="wu">Windows Updates</option>
+                <option value="device">Device</option>
+            </select>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-title-container">
+                <h1>🧬 Device DNA Report</h1>
+            </div>
+            <div id="header-info" class="header-info">
+                <!-- Populated by JavaScript -->
+            </div>
+        </header>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <div class="search-box">
+                <label for="global-search" class="sr-only">Search all sections</label>
+                <input type="text" id="global-search" placeholder="Search all sections..." aria-label="Search all sections">
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="expandAll()">Expand All</button>
+                <button class="btn btn-secondary" onclick="collapseAll()">Collapse All</button>
+            </div>
+            <div class="export-dropdown">
+                <button class="btn btn-primary">Export &#9662;</button>
+                <div class="export-dropdown-content">
+                    <button onclick="exportMarkdown()">Markdown (.md)</button>
+                    <button onclick="exportCSV()">CSV (.csv)</button>
+                    <button onclick="exportJSON()">JSON (.json)</button>
+                    <button onclick="exportXLSX()">Excel (.xlsx)</button>
+                </div>
+            </div>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">&#127769;</button>
+        </div>
+
+        <!-- OVERVIEW TAB -->
+        <div class="tab-panel active visible" data-tab="overview" role="tabpanel">
+            <!-- Executive Dashboard (populated by JavaScript) -->
+            <div id="executive-dashboard-container"></div>
+
+            <!-- Issue Summary (populated by JavaScript) -->
+            <div id="issue-summary-container"></div>
+
+            <!-- Collection Issues -->
+            <div id="collection-issues-section" class="section collapsed" data-domain="issues">
+                <div class="section-header">
+                    <h2>
+                        <span>&#9888;&#65039;</span>
+                        Collection Issues
+                        <span class="section-count" id="collection-issues-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content">
+                    <div id="collection-issues">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GROUP POLICY TAB -->
+        <div class="tab-panel" data-tab="gp" role="tabpanel" hidden>
+            <div id="gp-objects-section" class="section collapsed" data-domain="gp">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128196;</span>
+                        Group Policy Objects
+                        <span class="section-count" id="gp-objects-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="gp-objects-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="gp-settings-section" class="section collapsed" data-domain="gp">
+                <div class="section-header">
+                    <h2>
+                        <span>&#9881;</span>
+                        Group Policy Settings
+                        <span class="section-count" id="gp-settings-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="gp-settings-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- INTUNE TAB -->
+        <div class="tab-panel" data-tab="intune" role="tabpanel" hidden>
+            <div id="intune-groups-device-section" class="section collapsed" data-domain="intune">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128101;</span>
+                        Entra ID - Device Groups
+                        <span class="section-count" id="device-groups-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="device-groups-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="config-profiles-section" class="section collapsed" data-domain="intune">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128195;</span>
+                        Configuration Profiles
+                        <span class="section-count" id="config-profiles-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="config-profiles-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="compliance-policies-section" class="section collapsed" data-domain="intune">
+                <div class="section-header">
+                    <h2>
+                        <span>&#9989;</span>
+                        Compliance Policies
+                        <span class="section-count" id="compliance-policies-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="compliance-policies-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="applications-section" class="section collapsed" data-domain="intune">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128230;</span>
+                        Applications
+                        <span class="section-count" id="applications-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="applications-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="remediations-section" class="section collapsed" data-domain="intune">
+                <div class="section-header">
+                    <h2>
+                        <span>&#129657;</span>
+                        Proactive Remediations
+                        <span class="section-count" id="remediations-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="remediations-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- SCCM TAB -->
+        <div class="tab-panel" data-tab="sccm" role="tabpanel" hidden>
+            <div id="sccm-apps-section" class="section collapsed" data-domain="sccm">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128230;</span>
+                        SCCM Applications
+                        <span class="section-count" id="sccm-apps-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="sccm-apps-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="sccm-baselines-section" class="section collapsed" data-domain="sccm">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128737;</span>
+                        Compliance Baselines
+                        <span class="section-count" id="sccm-baselines-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="sccm-baselines-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="sccm-updates-section" class="section collapsed" data-domain="sccm">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128260;</span>
+                        Software Updates
+                        <span class="section-count" id="sccm-updates-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="sccm-updates-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="sccm-settings-section" class="section collapsed" data-domain="sccm">
+                <div class="section-header">
+                    <h2>
+                        <span>&#9881;</span>
+                        Client Settings
+                        <span class="section-count" id="sccm-settings-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="sccm-settings-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- WINDOWS UPDATE TAB -->
+        <div class="tab-panel" data-tab="wu" role="tabpanel" hidden>
+            <div id="wu-summary-section" class="section collapsed" data-domain="wu">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128200;</span>
+                        Windows Update Summary
+                        <span class="section-count" id="wu-summary-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="wu-summary-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="wu-policy-section" class="section collapsed" data-domain="wu">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128195;</span>
+                        Update Policy Settings
+                        <span class="section-count" id="wu-policy-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="wu-policy-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="wu-pending-section" class="section collapsed" data-domain="wu">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128260;</span>
+                        Pending Updates
+                        <span class="section-count" id="wu-pending-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="wu-pending-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div id="wu-history-section" class="section collapsed" data-domain="wu">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128221;</span>
+                        Update History
+                        <span class="section-count" id="wu-history-count">0</span>
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="wu-history-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- DEVICE TAB -->
+        <div class="tab-panel" data-tab="device" role="tabpanel" hidden>
+            <div id="device-info-section" class="section collapsed" data-domain="device">
+                <div class="section-header">
+                    <h2>
+                        <span>&#128187;</span>
+                        Device Information
+                    </h2>
+                    <span class="toggle-icon">&#9660;</span>
+                </div>
+                <div class="section-content" id="device-info-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Generated by DeviceDNA v0.2.0 | <span id="generation-time"></span></p>
+        </footer>
+    </div>
+
+    <!-- JavaScript for data loading and rendering -->
+    <script>
+        // Global data store
+        let deviceData = null;
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeTemplate();
+        });
+
+        function initializeTemplate() {
+            updateLoadingStatus('Checking for data source...');
+
+            // Check for URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const dataFile = urlParams.get('data');
+
+            if (dataFile) {
+                loadDataFromFile(dataFile);
+            } else {
+                // Try to load from embedded data
+                loadEmbeddedData();
+            }
+        }
+
+        function updateLoadingStatus(message) {
+            const statusEl = document.getElementById('loading-status');
+            if (statusEl) {
+                statusEl.textContent = message;
+            }
+        }
+
+        function loadDataFromFile(filename) {
+            updateLoadingStatus(`Loading ${filename}...`);
+
+            fetch(filename)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    updateLoadingStatus('Rendering report...');
+                    deviceData = data;
+                    renderReport();
+                    hideLoadingScreen();
+                })
+                .catch(error => {
+                    showError(`Failed to load data file: ${error.message}`);
+                });
+        }
+
+        function loadEmbeddedData() {
+            updateLoadingStatus('Checking for embedded data...');
+
+            try {
+                const dataElement = document.getElementById('policy-data');
+                if (dataElement && dataElement.textContent.trim()) {
+                    const content = dataElement.textContent.trim();
+                    // Check if it's not just the empty placeholder
+                    if (content.length > 100) {
+                        deviceData = JSON.parse(content);
+                        updateLoadingStatus('Rendering report...');
+                        renderReport();
+                        hideLoadingScreen();
+                        return;
+                    }
+                }
+
+                // No embedded data found - show file picker
+                showError('No data source found. Please select a JSON file to load.');
+            } catch (error) {
+                showError(`Failed to parse embedded data: ${error.message}`);
+            }
+        }
+
+        function hideLoadingScreen() {
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) {
+                loadingScreen.style.display = 'none';
+            }
+        }
+
+        function showError(message) {
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) {
+                loadingScreen.innerHTML = `
+                    <div style="text-align: center; max-width: 600px; padding: 40px;">
+                        <div style="font-size: 3rem; margin-bottom: 20px;">🧬</div>
+                        <h2 style="margin: 0 0 10px 0; color: #333;">DeviceDNA Report Viewer</h2>
+                        <p style="color: #666; margin-bottom: 30px;">No data file specified. Please select a JSON file to load.</p>
+
+                        <div style="margin: 30px 0;">
+                            <input type="file" id="json-file-input" accept=".json" style="display: none;">
+                            <button onclick="document.getElementById('json-file-input').click()"
+                                    style="background: #007bff; color: white; border: none; padding: 15px 30px;
+                                           font-size: 16px; border-radius: 6px; cursor: pointer;
+                                           box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                                📁 Load JSON File
+                            </button>
+                        </div>
+
+                        <div style="margin-top: 40px; padding-top: 30px; border-top: 1px solid #ddd;">
+                            <h3 style="color: #555; margin-bottom: 15px; font-size: 14px;">Or use these methods:</h3>
+                            <ul style="text-align: left; color: #666; line-height: 1.8; font-size: 13px;">
+                                <li><strong>URL parameter:</strong> <code>DeviceDNA-Report.html?data=yourfile.json</code></li>
+                                <li><strong>DeviceDNA.ps1:</strong> Run with <code>-AutoOpen</code> to generate and view automatically</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+
+                // Add file input event listener
+                const fileInput = document.getElementById('json-file-input');
+                if (fileInput) {
+                    fileInput.addEventListener('change', handleFileSelect);
+                }
+            }
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            updateLoadingStatus(`Loading ${file.name}...`);
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    updateLoadingStatus('Parsing JSON...');
+                    deviceData = JSON.parse(e.target.result);
+
+                    updateLoadingStatus('Rendering report...');
+                    renderReport();
+                    hideLoadingScreen();
+                } catch (error) {
+                    updateLoadingStatus('Error parsing JSON');
+                    setTimeout(() => {
+                        showError(`Failed to parse JSON file: ${error.message}`);
+                    }, 1000);
+                }
+            };
+
+            reader.onerror = function() {
+                updateLoadingStatus('Error reading file');
+                setTimeout(() => {
+                    showError('Failed to read file. Please try again.');
+                }, 1000);
+            };
+
+            reader.readAsText(file);
+        }
+
+        function renderReport() {
+            if (!deviceData) {
+                console.error('No data to render');
+                return;
+            }
+
+            console.log('Rendering report with data:', deviceData);
+
+            // Render header
+            renderHeader();
+
+            // Render all sections
+            renderOverview();
+            renderGroupPolicy();
+            renderIntune();
+            renderSCCM();
+            renderWindowsUpdate();
+            renderDeviceInfo();
+
+            // Initialize interactive features (from extracted-javascript.js)
+            initializeInteractiveFeatures();
+
+            // Set generation time
+            const genTimeEl = document.getElementById('generation-time');
+            if (genTimeEl && deviceData.exportDate) {
+                const date = new Date(deviceData.exportDate);
+                genTimeEl.textContent = date.toLocaleString();
+            }
+        }
+
+        function renderHeader() {
+            const headerInfo = document.getElementById('header-info');
+            if (!headerInfo || !deviceData.deviceInfo) return;
+
+            const info = deviceData.deviceInfo;
+            headerInfo.innerHTML = `
+                <div class="header-info-item">
+                    <label>Device Name</label>
+                    <span>${escapeHtml(info.computerName || 'Unknown')}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Operating System</label>
+                    <span>${escapeHtml(info.osName || '')} ${escapeHtml(info.osVersion || '')}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Serial Number</label>
+                    <span>${escapeHtml(info.serialNumber || 'N/A')}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Join Type</label>
+                    <span>${escapeHtml(info.joinType || 'Unknown')}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Management</label>
+                    <span>${escapeHtml(info.managementType || 'Unknown')}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Tenant ID</label>
+                    <span class="value-truncate">${escapeHtml(info.tenantId || 'N/A')}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Collection Time</label>
+                    <span>${info.collectionTime ? new Date(info.collectionTime).toLocaleString() : 'N/A'}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Compliance Status</label>
+                    <span>${info.complianceStatus || 'Unknown'}</span>
+                </div>
+                <div class="header-info-item">
+                    <label>Last Intune Sync</label>
+                    <span>${info.lastSyncTime ? new Date(info.lastSyncTime).toLocaleString() : 'N/A'}</span>
+                </div>
+            `;
+        }
+
+        // Main render functions - now implemented in external modules
+        function renderOverview() {
+            if (typeof renderOverviewTab === 'function') {
+                renderOverviewTab(deviceData);
+            } else {
+                console.warn('renderOverviewTab not loaded');
+            }
+        }
+
+        function renderGroupPolicy() {
+            // Rendered by renderAllOtherSections
+            console.log('Group Policy rendered via renderAllOtherSections');
+        }
+
+        function renderIntune() {
+            if (typeof renderAllIntuneSections === 'function' && deviceData.intune) {
+                renderAllIntuneSections(deviceData.intune);
+            } else {
+                console.warn('renderAllIntuneSections not loaded or no intune data');
+            }
+        }
+
+        function renderSCCM() {
+            // Rendered by renderAllOtherSections
+            console.log('SCCM rendered via renderAllOtherSections');
+        }
+
+        function renderWindowsUpdate() {
+            // Rendered by renderAllOtherSections
+            console.log('Windows Update rendered via renderAllOtherSections');
+        }
+
+        function renderDeviceInfo() {
+            if (typeof renderDeviceTab === 'function') {
+                renderDeviceTab(deviceData);
+            } else {
+                console.warn('renderDeviceTab not loaded');
+            }
+        }
+
+        function initializeInteractiveFeatures() {
+            // Call initialization from extracted-javascript.js if available
+            if (typeof initializeReportFeatures === 'function') {
+                initializeReportFeatures();
+            } else {
+                console.log('Interactive features will be initialized by extracted-javascript.js');
+            }
+        }
+
+        // Utility function
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = text.toString();
+            return div.innerHTML;
+        }
+    </script>
+
+    <!-- Load extracted JavaScript functions -->
+    <script src="extracted-javascript.js"></script>
+
+    <!-- Load render modules -->
+    <script src="render-intune.js"></script>
+    <script src="render-other-sections.js"></script>
+    <script src="render-overview-device.js"></script>
+
+    <script>
+        // Initialize all sections after all scripts loaded
+        if (deviceData) {
+            // Render Overview tab sections
+            renderOverview();
+
+            // Render all other sections
+            if (typeof renderAllOtherSections === 'function') {
+                renderAllOtherSections(deviceData);
+            }
+
+            // Initialize tab navigation and interactive features
+            initializeInteractiveFeatures();
+        }
+    </script>
+</body>
+</html>

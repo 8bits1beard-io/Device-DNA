@@ -1,0 +1,273 @@
+{
+  "exportDate": "2026-02-17T14:30:00.000Z",
+  "version": "0.2.0",
+  "deviceInfo": {
+    "computerName": "TEST-PC-001",
+    "osName": "Microsoft Windows 11 Pro",
+    "osVersion": "23H2",
+    "serialNumber": "ABC123XYZ789",
+    "joinType": "Azure AD Joined",
+    "managementType": "Microsoft Intune",
+    "tenantId": "12345678-1234-1234-1234-123456789012",
+    "collectionTime": "2026-02-17T14:25:00.000Z",
+    "complianceStatus": "Compliant",
+    "lastSyncTime": "2026-02-17T10:15:00.000Z",
+    "manufacturer": "Dell Inc.",
+    "model": "Latitude 7420",
+    "processor": "Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+    "memory": 16,
+    "tpm": {
+      "present": true,
+      "version": "2.0",
+      "enabled": true
+    }
+  },
+  "summary": {
+    "groupPolicyObjectsCount": 0,
+    "groupPolicySettingsCount": 0,
+    "configurationProfilesCount": 3,
+    "compliancePoliciesCount": 2,
+    "applicationsCount": 5,
+    "remediationsCount": 1,
+    "deviceGroupsCount": 4,
+    "sccmApplicationsCount": 0,
+    "sccmBaselinesCount": 0,
+    "sccmUpdatesCount": 0,
+    "windowsUpdatePendingCount": 2
+  },
+  "intune": {
+    "tenantId": "12345678-1234-1234-1234-123456789012",
+    "deviceGroups": [
+      {
+        "id": "group-1",
+        "displayName": "All Company Devices",
+        "groupType": "Dynamic"
+      },
+      {
+        "id": "group-2",
+        "displayName": "Windows Devices",
+        "groupType": "Dynamic"
+      },
+      {
+        "id": "group-3",
+        "displayName": "IT Department",
+        "groupType": "Assigned"
+      },
+      {
+        "id": "group-4",
+        "displayName": "Test Group",
+        "groupType": "Assigned"
+      }
+    ],
+    "configurationProfiles": [
+      {
+        "id": "profile-1",
+        "displayName": "Windows - Security Baseline",
+        "description": "Microsoft security baseline for Windows 11",
+        "policyType": "Settings Catalog",
+        "deploymentState": "Succeeded",
+        "targetingStatus": "All Company Devices",
+        "settings": [
+          {
+            "name": "Allow Camera",
+            "value": "Block",
+            "description": "Prevents users from accessing the camera"
+          },
+          {
+            "name": "Allow Cortana",
+            "value": "Block",
+            "description": "Prevents users from using Cortana"
+          },
+          {
+            "name": "BitLocker - Require Device Encryption",
+            "value": "Enabled",
+            "description": "Enforces device encryption"
+          }
+        ]
+      },
+      {
+        "id": "profile-2",
+        "displayName": "Windows - WiFi Profile - Corp Network",
+        "description": "Corporate WiFi configuration",
+        "policyType": "WiFi",
+        "deploymentState": "Succeeded",
+        "targetingStatus": "All Company Devices, IT Department (+1 more)"
+      },
+      {
+        "id": "profile-3",
+        "displayName": "Windows - Defender Antivirus",
+        "description": "Defender configuration and exclusions",
+        "policyType": "Endpoint Protection",
+        "deploymentState": "Error",
+        "targetingStatus": "Windows Devices",
+        "settings": [
+          {
+            "name": "Real-time Protection",
+            "value": "Enabled"
+          },
+          {
+            "name": "Cloud Protection",
+            "value": "Enabled"
+          }
+        ]
+      }
+    ],
+    "compliancePolicies": [
+      {
+        "id": "compliance-1",
+        "displayName": "Windows - Minimum Requirements",
+        "platform": "Windows 11",
+        "targetingStatus": "All Company Devices",
+        "complianceState": "Compliant"
+      },
+      {
+        "id": "compliance-2",
+        "displayName": "Windows - Security Requirements",
+        "platform": "Windows 11",
+        "targetingStatus": "All Company Devices",
+        "complianceState": "Compliant"
+      }
+    ],
+    "applications": [
+      {
+        "id": "app-1",
+        "displayName": "Microsoft 365 Apps for Enterprise",
+        "version": "16.0.16026.20002",
+        "publisher": "Microsoft Corporation",
+        "type": "Microsoft 365 Apps",
+        "intent": "Required",
+        "installState": "Installed",
+        "targetingStatus": "All Company Devices"
+      },
+      {
+        "id": "app-2",
+        "displayName": "Microsoft Teams",
+        "version": "24004.1309.2689.7070",
+        "publisher": "Microsoft Corporation",
+        "type": "Win32",
+        "intent": "Required",
+        "installState": "Installed",
+        "targetingStatus": "All Company Devices"
+      },
+      {
+        "id": "app-3",
+        "displayName": "Company VPN Client",
+        "version": "2.1.5",
+        "publisher": "IT Department",
+        "type": "Win32",
+        "intent": "Required",
+        "installState": "Installed",
+        "targetingStatus": "IT Department"
+      },
+      {
+        "id": "app-4",
+        "displayName": "Adobe Acrobat Reader",
+        "version": "23.008.20470",
+        "publisher": "Adobe Systems Inc.",
+        "type": "Win32",
+        "intent": "Available",
+        "installState": "Installed",
+        "targetingStatus": "All Company Devices"
+      },
+      {
+        "id": "app-5",
+        "displayName": "7-Zip",
+        "version": "23.01",
+        "publisher": "Igor Pavlov",
+        "type": "Win32",
+        "intent": "Available",
+        "installState": "Not Installed",
+        "targetingStatus": "All Company Devices"
+      }
+    ],
+    "remediations": [
+      {
+        "id": "remediation-1",
+        "displayName": "Check BitLocker Status",
+        "runAs": "System",
+        "detectionState": "Success",
+        "remediationState": "N/A",
+        "lastRun": "2026-02-17T08:00:00.000Z",
+        "targetingStatus": "All Company Devices"
+      }
+    ]
+  },
+  "groupPolicy": {
+    "computerScope": {
+      "appliedGPOs": []
+    },
+    "userScope": {
+      "appliedGPOs": []
+    },
+    "settings": []
+  },
+  "sccm": {
+    "clientInstalled": false,
+    "applications": [],
+    "baselines": [],
+    "softwareUpdates": [],
+    "clientSettings": []
+  },
+  "windowsUpdate": {
+    "summary": {
+      "managedBy": "Intune - Windows Update for Business",
+      "managedByColor": "success",
+      "source": "Windows Update for Business",
+      "wuServer": "https://fe3.update.microsoft.com/v9/WindowsUpdate",
+      "serviceState": "Running",
+      "lastScanTime": "2026-02-17T06:00:00.000Z",
+      "rebootPending": false
+    },
+    "registryPolicy": {
+      "settings": [
+        {
+          "name": "DeferFeatureUpdatesPeriodInDays",
+          "value": "180",
+          "hive": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate"
+        },
+        {
+          "name": "DeferQualityUpdatesPeriodInDays",
+          "value": "7",
+          "hive": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate"
+        }
+      ]
+    },
+    "pendingUpdates": [
+      {
+        "title": "2024-02 Cumulative Update for Windows 11 Version 23H2 (KB5034763)",
+        "kbArticle": "KB5034763",
+        "severity": "Critical",
+        "downloadStatus": "Downloaded"
+      },
+      {
+        "title": "2024-02 Security Update for Microsoft Defender (KB2267602)",
+        "kbArticle": "KB2267602",
+        "severity": "Important",
+        "downloadStatus": "Downloaded"
+      }
+    ],
+    "updateHistory": [
+      {
+        "title": "2024-01 Cumulative Update for Windows 11 (KB5034123)",
+        "date": "2026-01-15T14:30:00.000Z",
+        "operation": "Installation",
+        "result": "Succeeded",
+        "hResult": "0x0"
+      },
+      {
+        "title": "Microsoft Defender Antivirus Definition Update",
+        "date": "2026-02-16T22:00:00.000Z",
+        "operation": "Installation",
+        "result": "Succeeded",
+        "hResult": "0x0"
+      }
+    ]
+  },
+  "collectionIssues": [
+    {
+      "phase": "Intune",
+      "severity": "Info",
+      "message": "SCCM client not detected - SCCM data collection skipped"
+    }
+  ]
+}
