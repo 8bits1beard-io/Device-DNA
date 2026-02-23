@@ -4977,10 +4977,10 @@ function Export-DeviceDNAJson {
 function Copy-DeviceDNATemplate {
     <#
     .SYNOPSIS
-        Returns the path to the DeviceDNA HTML viewer in the output root directory.
+        Returns the path to the DeviceDNA HTML viewer in the repo/base output directory.
     .DESCRIPTION
-        Locates DeviceDNA-Viewer.html in the output root (parent of device-specific folder).
-        The viewer is committed to the repo at output/DeviceDNA-Viewer.html and shared by all devices.
+        Locates DeviceDNA-Viewer.html in the base output directory (parent of the output folder).
+        The viewer is committed to the repo root and shared by all devices.
     .PARAMETER OutputPath
         Device-specific output directory path (e.g., "C:\output\PC001")
     .EXAMPLE
@@ -4998,12 +4998,14 @@ function Copy-DeviceDNATemplate {
         New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
     }
 
-    # Get output root (parent folder containing all device folders)
+    # Get output root and base output directory
+    # OutputPath is typically <base>\output\<DeviceName>
     $outputRoot = Split-Path -Parent $OutputPath
+    $baseOutputRoot = Split-Path -Parent $outputRoot
 
-    # Viewer is committed at output/DeviceDNA-Viewer.html in the repo
+    # Viewer is committed at the repo/base output root
     $viewerFileName = "DeviceDNA-Viewer.html"
-    $viewerPath = Join-Path -Path $outputRoot -ChildPath $viewerFileName
+    $viewerPath = Join-Path -Path $baseOutputRoot -ChildPath $viewerFileName
 
     if (-not (Test-Path -Path $viewerPath)) {
         Write-DeviceDNALog -Message "HTML viewer not found at: $viewerPath" -Component "Copy-DeviceDNATemplate" -Type 2
@@ -5070,10 +5072,10 @@ function New-DeviceDNAReport {
         throw
     }
 
-    # Construct report URL (viewer is in parent dir, data is in device subfolder)
+    # Construct report URL (viewer is in base dir, data is in output/device subfolder)
     $jsonFileName = Split-Path -Leaf $jsonPath
     $deviceFolderName = Split-Path -Leaf $OutputPath
-    $reportUrl = "../DeviceDNA-Viewer.html?data=$deviceFolderName/$jsonFileName"
+    $reportUrl = "../../DeviceDNA-Viewer.html?data=output/$deviceFolderName/$jsonFileName"
 
     Write-DeviceDNALog -Message "Report generated successfully: $reportUrl" -Component "New-DeviceDNAReport" -Type 1
 

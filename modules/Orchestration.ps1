@@ -652,16 +652,17 @@ function Invoke-DeviceDNACollection {
         if ($AutoOpen -and $templatePath -and (Test-Path $templatePath)) {
             try {
                 # Construct file:// URL with data parameter
-                # Viewer is at output root, JSON is in device subfolder
+                # Viewer is at base output root, JSON is in output/device subfolder
                 $jsonFileName = Split-Path -Leaf $jsonPath
                 $deviceFolderName = Split-Path -Leaf $outputPath
                 $outputRoot = Split-Path -Parent $outputPath
+                $baseOutputRoot = Split-Path -Parent $outputRoot
                 $viewerFileName = "DeviceDNA-Viewer.html"
 
                 # Convert to file:// URL format
                 # Note: Different browsers handle file:// URLs differently with query parameters
                 # This works in most modern browsers (Chrome, Edge, Firefox)
-                $fileUrl = "file:///$($outputRoot.Replace('\', '/'))/$viewerFileName?data=$deviceFolderName/$jsonFileName"
+                $fileUrl = "file:///$($baseOutputRoot.Replace('\', '/'))/$viewerFileName?data=output/$deviceFolderName/$jsonFileName"
 
                 Write-DeviceDNALog -Message "Opening report: $fileUrl" -Component "Invoke-DeviceDNACollection" -Type 1
                 Start-Process $fileUrl
