@@ -75,7 +75,7 @@ Enhanced with management source detection logic that detects SCCM, Intune WUFB (
 ### Report Generation (Reporting.ps1)
 `New-DeviceDNAReport` produces a single self-contained HTML file with embedded CSS, JavaScript, and data. The JS handles client-side rendering, filtering, sorting, theme toggle, and export (Markdown/CSV/JSON/Excel via SheetJS CDN with fallback). All sections collapsed by default except Overview tab. Windows Update Summary includes color-coded 'Managed By' badge (Blue=SCCM, Green=Intune WUFB/ESUS, Gray=WSUS/Direct).
 
-### Standalone Viewer (output/DeviceDNA-Viewer.html)
+### Standalone Viewer (DeviceDNA-Viewer.html)
 A single self-contained HTML file (~7,400 lines) that renders any DeviceDNA JSON file via file picker or drag-and-drop. Embeds all CSS from Reporting.ps1 and all JS render functions inline — no external dependencies. Supports all 6 tabs, collapsible sections, expandable detail rows on config profiles, sorting, filtering, theme toggle, and export. See `docs/htmlviewer-implementation.md` for architecture details.
 
 ### Shared State

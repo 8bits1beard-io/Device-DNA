@@ -150,6 +150,8 @@ cd Device-DNA
 
 All output is written to `<OutputPath>/output/<DeviceName>/`:
 
+The shared viewer file `DeviceDNA-Viewer.html` is stored at the repo root. The `output/` folder contains generated device artifacts and is intended to be gitignored.
+
 | File | Description |
 |------|-------------|
 | `DeviceDNA_<DeviceName>_<timestamp>.html` | Self-contained interactive HTML report |
