@@ -226,7 +226,9 @@ function Invoke-DeviceDNACollection {
         Write-StatusMessage "Phase 1: Starting collection (GP + Intune + SCCM + WU)..." -Type Progress
 
         # Determine if we should run collections based on environment and -Skip parameter
-        $shouldCollectGP = 'GroupPolicy' -notin $Skip
+        # Cloud-only (Azure AD joined, not domain joined) devices do not use AD GPO/RSoP.
+        $isCloudOnlyDevice = $joinInfo.AzureAdJoined -and (-not $joinInfo.DomainJoined)
+        $shouldCollectGP = 'GroupPolicy' -notin $Skip -and (-not $isCloudOnlyDevice)
         $shouldCollectIntune = 'Intune' -notin $Skip -and $script:GraphConnected -and $tenantId -and ($joinInfo.AzureAdJoined -or $joinInfo.WorkplaceJoined)
 
         # Track A: Start GP collection using the existing function in main thread first
@@ -246,6 +248,10 @@ function Invoke-DeviceDNACollection {
 
             if ($shouldCollectGP) {
                 Write-StatusMessage "Track A: Starting remote GP collection (async via WinRM)..." -Type Progress
+            }
+            elseif ($isCloudOnlyDevice) {
+                Write-StatusMessage "Track A: Skipping GP collection - device is cloud-only (not domain joined)" -Type Info
+                $script:CollectionIssues += @{ severity = "Info"; phase = "Group Policy"; message = "Skipped - cloud-only device (not domain joined)" }
             }
             else {
                 Write-StatusMessage "Track A: Skipping GP collection (disabled via -Skip parameter)" -Type Info
@@ -428,6 +434,10 @@ function Invoke-DeviceDNACollection {
 
             if ($shouldCollectGP) {
                 Write-StatusMessage "Track A: Starting local GP collection..." -Type Progress
+            }
+            elseif ($isCloudOnlyDevice) {
+                Write-StatusMessage "Track A: Skipping GP collection - device is cloud-only (not domain joined)" -Type Info
+                $script:CollectionIssues += @{ severity = "Info"; phase = "Group Policy"; message = "Skipped - cloud-only device (not domain joined)" }
             }
             else {
                 Write-StatusMessage "Track A: Skipping GP collection (disabled via -Skip parameter)" -Type Info
