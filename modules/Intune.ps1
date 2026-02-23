@@ -287,14 +287,32 @@ function Connect-GraphAPI {
         # (included in full Microsoft.Graph SDK, or can be installed standalone)
         $graphModule = Get-Module -ListAvailable Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
         if (-not $graphModule) {
-            Write-StatusMessage "Microsoft.Graph.Authentication module not installed" -Type Error
-            Write-Host ""
-            Write-Host "  The Microsoft.Graph.Authentication module is required for Intune data collection." -ForegroundColor Yellow
-            Write-Host "  Install it with:" -ForegroundColor Gray
-            Write-Host "    Install-Module Microsoft.Graph.Authentication -Scope CurrentUser" -ForegroundColor Cyan
-            Write-Host ""
-            $script:CollectionIssues += @{ severity = "Warning"; phase = "Intune"; message = "Microsoft.Graph.Authentication module not installed - Intune collection unavailable" }
-            return $false
+            Write-StatusMessage "Microsoft.Graph.Authentication module not installed" -Type Warning
+            Write-StatusMessage "Attempting to install Microsoft.Graph.Authentication (CurrentUser scope)..." -Type Progress
+            Write-DeviceDNALog -Message "Microsoft.Graph.Authentication module missing - attempting auto-install" -Component "Connect-GraphAPI" -Type 2
+
+            try {
+                Install-Module Microsoft.Graph.Authentication -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+                $graphModule = Get-Module -ListAvailable Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
+
+                if (-not $graphModule) {
+                    throw "Install-Module completed but Microsoft.Graph.Authentication was not found afterward."
+                }
+
+                Write-StatusMessage "Installed Microsoft.Graph.Authentication successfully" -Type Success
+                Write-DeviceDNALog -Message "Auto-install of Microsoft.Graph.Authentication succeeded" -Component "Connect-GraphAPI" -Type 1
+            }
+            catch {
+                Write-StatusMessage "Failed to install Microsoft.Graph.Authentication automatically" -Type Error
+                Write-Host ""
+                Write-Host "  The Microsoft.Graph.Authentication module is required for Intune data collection." -ForegroundColor Yellow
+                Write-Host "  Install it with:" -ForegroundColor Gray
+                Write-Host "    Install-Module Microsoft.Graph.Authentication -Scope CurrentUser" -ForegroundColor Cyan
+                Write-Host ""
+                Write-DeviceDNALog -Message "Auto-install failed: $($_.Exception.Message)" -Component "Connect-GraphAPI" -Type 3
+                $script:CollectionIssues += @{ severity = "Warning"; phase = "Intune"; message = "Microsoft.Graph.Authentication module not installed - Intune collection unavailable" }
+                return $false
+            }
         }
 
         Write-StatusMessage "Connecting to Microsoft Graph (browser authentication)..." -Type Progress
