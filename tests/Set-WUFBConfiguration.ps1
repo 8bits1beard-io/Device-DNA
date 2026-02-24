@@ -971,7 +971,7 @@ function Write-WUSettingsReferenceMarkdown {
     $lines.Add("- Confidence: $($mgmt.Confidence)")
     $lines.Add("- Override risk: $($mgmt.OverrideRisk)")
     if ($ChangedSettingId) {
-        $lines.Add("- Changed this run: `$ChangedSettingId` = `$(Format-WUSettingValue -Value $ChangedValue)`")
+        $lines.Add("- Changed this run: ``$ChangedSettingId`` = ``$(Format-WUSettingValue -Value $ChangedValue)``")
     }
     $lines.Add("")
     $lines.Add("## How To Read This")
