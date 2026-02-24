@@ -46,7 +46,17 @@ param(
 
     [Parameter()]
     [ValidateSet(2, 4, 8, 32)]
-    [int]$BranchReadiness = 32  # 32 = GA Channel
+    [int]$BranchReadiness = 32,  # 32 = GA Channel
+
+    [Parameter()]
+    [switch]$Interactive,
+
+    [Parameter()]
+    [switch]$ViewOnly,
+
+    [Parameter()]
+    [ValidateRange(1, 50)]
+    [int]$HistoryTop = 5
 )
 
 #Requires -RunAsAdministrator
@@ -123,7 +133,7 @@ function Initialize-WUFBLog {
         Write-WUFBLog -Message "Version: 3.0" -Type 1
         Write-WUFBLog -Message "Computer: $env:COMPUTERNAME" -Type 1
         Write-WUFBLog -Message "User: $env:USERNAME" -Type 1
-        Write-WUFBLog -Message "Parameters: DeferFeatureDays=$DeferFeatureDays, DeferQualityDays=$DeferQualityDays, BranchReadiness=$BranchReadiness" -Type 1
+        Write-WUFBLog -Message "Parameters: DeferFeatureDays=$DeferFeatureDays, DeferQualityDays=$DeferQualityDays, BranchReadiness=$BranchReadiness, Interactive=$Interactive, ViewOnly=$ViewOnly, HistoryTop=$HistoryTop" -Type 1
         Write-WUFBLog -Message "========================================" -Type 1
 
         return $script:LogFilePath
@@ -228,15 +238,13 @@ function Get-WUManagementSource {
     # Check for SCCM (would override everything in Device DNA)
     $sccmInstalled = $false
     try {
+        $ccmService = Get-Service -Name 'CcmExec' -ErrorAction SilentlyContinue
         $sccmNamespace = Get-WmiObject -Namespace "root\ccm" -Class "__Namespace" -ErrorAction SilentlyContinue
-        if ($sccmNamespace) {
-            $sccmUpdates = Get-WmiObject -Namespace "root\ccm\ClientSDK" -Class "CCM_SoftwareUpdate" -ErrorAction SilentlyContinue
-            if ($sccmUpdates) {
-                $sccmInstalled = $true
-                $source = "Configuration Manager (SCCM)"
-                $management = "SCCM"
-                Write-WUFBLog -Message "Detected SCCM management (takes precedence)" -Type 2
-            }
+        if ($ccmService -or $sccmNamespace) {
+            $sccmInstalled = $true
+            $source = "Configuration Manager (SCCM)"
+            $management = "SCCM"
+            Write-WUFBLog -Message "Detected SCCM management (takes precedence)" -Type 2
         }
     } catch {
         # SCCM not installed
@@ -373,6 +381,838 @@ function Show-RegistryConfig {
     Write-Host ""
 }
 
+function New-WUEvidence {
+    [CmdletBinding()]
+    param(
+        [string]$Category,
+        [string]$Signal,
+        [object]$Value,
+        [string]$Path,
+        [int]$Weight = 50,
+        [string]$Notes
+    )
+
+    [pscustomobject]@{
+        Category = $Category
+        Signal   = $Signal
+        Value    = $Value
+        Path     = $Path
+        Weight   = $Weight
+        Notes    = $Notes
+    }
+}
+
+function Get-WUManagementEvidence {
+    [CmdletBinding()]
+    param()
+
+    $evidence = New-Object System.Collections.Generic.List[object]
+
+    $wuPolicy = Get-ItemProperty -Path $wuPolicyPath -ErrorAction SilentlyContinue
+    $auPolicy = Get-ItemProperty -Path $auPolicyPath -ErrorAction SilentlyContinue
+
+    if ($auPolicy -and ($auPolicy.PSObject.Properties.Name -contains 'UseWUServer')) {
+        $evidence.Add((New-WUEvidence -Category 'WSUS' -Signal 'UseWUServer' -Value $auPolicy.UseWUServer -Path $auPolicyPath -Weight 80 -Notes 'AU policy controls WSUS usage'))
+    }
+
+    if ($wuPolicy) {
+        foreach ($name in 'WUServer', 'WUStatusServer', 'DeferFeatureUpdates', 'DeferQualityUpdates', 'BranchReadinessLevel') {
+            if ($wuPolicy.PSObject.Properties.Name -contains $name) {
+                $evidence.Add((New-WUEvidence -Category 'PolicyRegistry' -Signal $name -Value $wuPolicy.$name -Path $wuPolicyPath -Weight 60 -Notes 'Windows Update policy registry value present'))
+            }
+        }
+    }
+
+    if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'WUServer') -and $wuPolicy.WUServer) {
+        if ($wuPolicy.WUServer -match '\.mp\.microsoft\.com' -or $wuPolicy.WUServer -match 'eus\.wu\.manage\.microsoft\.com') {
+            $evidence.Add((New-WUEvidence -Category 'Intune-ESUS' -Signal 'WUServerPattern' -Value $wuPolicy.WUServer -Path $wuPolicyPath -Weight 95 -Notes 'Cloud update endpoint indicates Intune/ESUS style management'))
+        }
+    }
+
+    $policyManagerUpdatePath = 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Update'
+    $pmUpdate = Get-ItemProperty -Path $policyManagerUpdatePath -ErrorAction SilentlyContinue
+    if ($pmUpdate) {
+        $evidence.Add((New-WUEvidence -Category 'MDM' -Signal 'PolicyManagerUpdate' -Value 'Present' -Path $policyManagerUpdatePath -Weight 85 -Notes 'Policy CSP Update node present'))
+    }
+
+    try {
+        $ccmSvc = Get-Service -Name 'CcmExec' -ErrorAction SilentlyContinue
+        if ($ccmSvc) {
+            $evidence.Add((New-WUEvidence -Category 'SCCM' -Signal 'CcmExecService' -Value $ccmSvc.Status -Path 'Service:CcmExec' -Weight 95 -Notes 'ConfigMgr client service detected'))
+        }
+    } catch {}
+
+    try {
+        $ccmNs = Get-CimInstance -Namespace 'root\ccm' -ClassName '__NAMESPACE' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($ccmNs) {
+            $evidence.Add((New-WUEvidence -Category 'SCCM' -Signal 'CimNamespaceRootCcm' -Value 'Present' -Path 'root\ccm' -Weight 90 -Notes 'ConfigMgr WMI namespace detected'))
+        }
+    } catch {
+        try {
+            $ccmNsLegacy = Get-WmiObject -Namespace 'root\ccm' -Class '__Namespace' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($ccmNsLegacy) {
+                $evidence.Add((New-WUEvidence -Category 'SCCM' -Signal 'WmiNamespaceRootCcm' -Value 'Present' -Path 'root\ccm' -Weight 90 -Notes 'ConfigMgr WMI namespace detected (legacy)'))
+            }
+        } catch {}
+    }
+
+    $wufbIndicators = @(
+        'DeferFeatureUpdates',
+        'DeferQualityUpdates',
+        'BranchReadinessLevel',
+        'PauseFeatureUpdatesStartTime',
+        'PauseQualityUpdatesStartTime'
+    )
+    if ($wuPolicy) {
+        foreach ($indicator in $wufbIndicators) {
+            if ($wuPolicy.PSObject.Properties.Name -contains $indicator) {
+                $evidence.Add((New-WUEvidence -Category 'WUFB' -Signal $indicator -Value $wuPolicy.$indicator -Path $wuPolicyPath -Weight 70 -Notes 'WUFB-related policy value present'))
+            }
+        }
+    }
+
+    return @($evidence)
+}
+
+function Resolve-WUManagementSource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [array]$Evidence
+    )
+
+    $categories = @($Evidence | ForEach-Object { $_.Category } | Sort-Object -Unique)
+    $signals = @($Evidence | ForEach-Object { $_.Signal })
+
+    $hasSCCM = $categories -contains 'SCCM'
+    $hasMDM = $categories -contains 'MDM'
+    $hasESUS = $categories -contains 'Intune-ESUS'
+    $hasWUFB = $categories -contains 'WUFB'
+
+    $useWUServerEvidence = $Evidence | Where-Object { $_.Signal -eq 'UseWUServer' } | Select-Object -First 1
+    $useWUServer = if ($useWUServerEvidence) { [int]$useWUServerEvidence.Value } else { $null }
+    $hasWSUS = ($useWUServer -eq 1) -or ($signals | Where-Object { $_ -in @('WUServer', 'WUStatusServer', 'WUServerPattern') }).Count -gt 0
+
+    $sourcesDetected = New-Object System.Collections.Generic.List[string]
+    if ($hasSCCM) { $sourcesDetected.Add('SCCM') }
+    if ($hasESUS) { $sourcesDetected.Add('Intune-ESUS') }
+    elseif ($hasMDM -and $hasWUFB) { $sourcesDetected.Add('Intune-WUFB') }
+    elseif ($hasMDM) { $sourcesDetected.Add('MDM') }
+    if ($hasWSUS) { $sourcesDetected.Add('WSUS') }
+    if ($hasWUFB) { $sourcesDetected.Add('WUFB') }
+
+    $effective = 'Direct'
+    $confidence = 'Medium'
+    $overrideRisk = 'Low'
+    $editableLocally = $true
+
+    if ($hasSCCM) {
+        $effective = 'SCCM'
+        $confidence = 'High'
+        $overrideRisk = 'High'
+        $editableLocally = $false
+    } elseif ($hasESUS) {
+        $effective = 'Intune-ESUS'
+        $confidence = 'High'
+        $overrideRisk = 'High'
+        $editableLocally = $false
+    } elseif ($hasMDM -and $hasWUFB) {
+        $effective = 'Intune-WUFB'
+        $confidence = 'High'
+        $overrideRisk = 'High'
+        $editableLocally = $false
+    } elseif ($hasWSUS -and $hasWUFB) {
+        $effective = 'CoManaged (WSUS + WUFB)'
+        $confidence = 'Medium'
+        $overrideRisk = 'Medium'
+    } elseif ($hasWSUS) {
+        $effective = 'WSUS'
+        $confidence = 'High'
+        $overrideRisk = if ($hasMDM) { 'High' } else { 'Medium' }
+    } elseif ($hasWUFB) {
+        $effective = 'WUFB (Local/Policy)'
+        $confidence = 'Medium'
+        $overrideRisk = if ($hasMDM) { 'High' } else { 'Low' }
+        $editableLocally = -not $hasMDM
+    } elseif ($Evidence.Count -eq 0) {
+        $effective = 'Direct'
+        $confidence = 'Medium'
+        $overrideRisk = 'Low'
+    }
+
+    [pscustomobject]@{
+        EffectiveSource = $effective
+        SourcesDetected = @($sourcesDetected)
+        Confidence = $confidence
+        IsCoManaged = (@($sourcesDetected).Count -gt 1)
+        EditableLocally = $editableLocally
+        OverrideRisk = $overrideRisk
+        Evidence = @($Evidence)
+    }
+}
+
+function Get-WUPolicyConfig {
+    [CmdletBinding()]
+    param()
+
+    $wuPolicy = Get-ItemProperty -Path $wuPolicyPath -ErrorAction SilentlyContinue
+    $auPolicy = Get-ItemProperty -Path $auPolicyPath -ErrorAction SilentlyContinue
+
+    [pscustomobject]@{
+        UseWUServer = if ($auPolicy -and ($auPolicy.PSObject.Properties.Name -contains 'UseWUServer')) { $auPolicy.UseWUServer } else { $null }
+        WUServer = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'WUServer')) { $wuPolicy.WUServer } else { $null }
+        WUStatusServer = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'WUStatusServer')) { $wuPolicy.WUStatusServer } else { $null }
+        DoNotConnectToWindowsUpdateInternetLocations = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'DoNotConnectToWindowsUpdateInternetLocations')) { $wuPolicy.DoNotConnectToWindowsUpdateInternetLocations } else { $null }
+        DeferFeatureUpdates = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'DeferFeatureUpdates')) { $wuPolicy.DeferFeatureUpdates } else { $null }
+        DeferFeatureUpdatesPeriodInDays = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'DeferFeatureUpdatesPeriodinDays')) { $wuPolicy.DeferFeatureUpdatesPeriodinDays } else { $null }
+        DeferQualityUpdates = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'DeferQualityUpdates')) { $wuPolicy.DeferQualityUpdates } else { $null }
+        DeferQualityUpdatesPeriodInDays = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'DeferQualityUpdatesPeriodinDays')) { $wuPolicy.DeferQualityUpdatesPeriodinDays } else { $null }
+        BranchReadinessLevel = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'BranchReadinessLevel')) { $wuPolicy.BranchReadinessLevel } else { $null }
+        PauseFeatureUpdatesStartTime = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'PauseFeatureUpdatesStartTime')) { $wuPolicy.PauseFeatureUpdatesStartTime } else { $null }
+        PauseQualityUpdatesStartTime = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'PauseQualityUpdatesStartTime')) { $wuPolicy.PauseQualityUpdatesStartTime } else { $null }
+        AllowAutoWindowsUpdateDownloadOverMeteredNetwork = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'AllowAutoWindowsUpdateDownloadOverMeteredNetwork')) { $wuPolicy.AllowAutoWindowsUpdateDownloadOverMeteredNetwork } else { $null }
+    }
+}
+
+function Get-WUActiveHours {
+    [CmdletBinding()]
+    param()
+
+    $uxPath = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+    $ux = Get-ItemProperty -Path $uxPath -ErrorAction SilentlyContinue
+
+    $start = $null
+    foreach ($n in @('ActiveHoursStart', 'SmartActiveHoursStart', 'SetActiveHoursStart')) {
+        if ($ux -and ($ux.PSObject.Properties.Name -contains $n)) { $start = $ux.$n; break }
+    }
+
+    $end = $null
+    foreach ($n in @('ActiveHoursEnd', 'SmartActiveHoursEnd', 'SetActiveHoursEnd')) {
+        if ($ux -and ($ux.PSObject.Properties.Name -contains $n)) { $end = $ux.$n; break }
+    }
+
+    $smart = $null
+    foreach ($n in @('SmartActiveHoursState', 'SmartActiveHoursEnabled')) {
+        if ($ux -and ($ux.PSObject.Properties.Name -contains $n)) { $smart = $ux.$n; break }
+    }
+
+    [pscustomobject]@{
+        StartHour = $start
+        EndHour = $end
+        SmartActiveHoursEnabled = $smart
+        Source = 'Local'
+        Editable = $true
+        RegistryPath = $uxPath
+    }
+}
+
+function Get-WUMeteredState {
+    [CmdletBinding()]
+    param()
+
+    $wuPolicy = Get-ItemProperty -Path $wuPolicyPath -ErrorAction SilentlyContinue
+    [pscustomobject]@{
+        AllowAutoWindowsUpdateDownloadOverMeteredNetwork = if ($wuPolicy -and ($wuPolicy.PSObject.Properties.Name -contains 'AllowAutoWindowsUpdateDownloadOverMeteredNetwork')) { $wuPolicy.AllowAutoWindowsUpdateDownloadOverMeteredNetwork } else { $null }
+        Source = 'Policy'
+        Editable = $true
+        RegistryPath = $wuPolicyPath
+    }
+}
+
+function Get-WUUpdateHistory {
+    [CmdletBinding()]
+    param(
+        [int]$Top = 5
+    )
+
+    $recent = @()
+    $lastInstalled = $null
+
+    try {
+        $session = New-Object -ComObject 'Microsoft.Update.Session'
+        $searcher = $session.CreateUpdateSearcher()
+        $count = $searcher.GetTotalHistoryCount()
+
+        if ($count -gt 0) {
+            $entries = $searcher.QueryHistory(0, [Math]::Min($count, [Math]::Max($Top, 20)))
+            $recent = @(
+                $entries |
+                    Where-Object { $_.Operation -eq 1 } |
+                    Select-Object -First $Top -Property @{
+                        Name = 'Date'; Expression = { $_.Date }
+                    }, @{
+                        Name = 'Title'; Expression = { $_.Title }
+                    }, @{
+                        Name = 'ResultCode'; Expression = { $_.ResultCode }
+                    }
+            )
+            $lastInstalled = $recent | Select-Object -First 1
+        }
+    } catch {
+        try {
+            $recent = @(
+                Get-HotFix -ErrorAction SilentlyContinue |
+                    Sort-Object InstalledOn -Descending |
+                    Select-Object -First $Top -Property @{
+                        Name = 'Date'; Expression = { $_.InstalledOn }
+                    }, @{
+                        Name = 'Title'; Expression = { $_.HotFixID }
+                    }, @{
+                        Name = 'ResultCode'; Expression = { $null }
+                    }
+            )
+            $lastInstalled = $recent | Select-Object -First 1
+        } catch {}
+    }
+
+    [pscustomobject]@{
+        LastInstalled = $lastInstalled
+        Recent = @($recent)
+        LastScanTime = $null
+    }
+}
+
+function Get-WUServiceState {
+    [CmdletBinding()]
+    param()
+
+    $serviceItems = foreach ($svcName in @('wuauserv', 'UsoSvc', 'BITS')) {
+        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if ($svc) {
+            $startMode = $null
+            try {
+                $svcCim = Get-CimInstance -ClassName Win32_Service -Filter "Name='$svcName'" -ErrorAction SilentlyContinue
+                if ($svcCim) { $startMode = $svcCim.StartMode }
+            } catch {}
+
+            [pscustomobject]@{
+                Name = $svc.Name
+                Status = [string]$svc.Status
+                StartType = $startMode
+            }
+        }
+    }
+
+    [pscustomobject]@{
+        RebootRequired = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
+        Services = @($serviceItems)
+    }
+}
+
+function Get-WUDashboardData {
+    [CmdletBinding()]
+    param(
+        [int]$HistoryTop = 5
+    )
+
+    $evidence = Get-WUManagementEvidence
+    [pscustomobject]@{
+        Timestamp = Get-Date
+        ComputerName = $env:COMPUTERNAME
+        Management = Resolve-WUManagementSource -Evidence $evidence
+        UpdateConfig = Get-WUPolicyConfig
+        ActiveHours = Get-WUActiveHours
+        Metered = Get-WUMeteredState
+        UpdateHistory = Get-WUUpdateHistory -Top $HistoryTop
+        SystemState = Get-WUServiceState
+    }
+}
+
+function Show-WUDashboard {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Dashboard
+    )
+
+    $m = $Dashboard.Management
+    $c = $Dashboard.UpdateConfig
+    $a = $Dashboard.ActiveHours
+    $metered = $Dashboard.Metered
+    $h = $Dashboard.UpdateHistory
+    $s = $Dashboard.SystemState
+
+    Write-Host "`n[DISCOVERY] Windows Update Management & Status" -ForegroundColor Cyan
+    Write-Host ("=" * 80) -ForegroundColor Gray
+
+    Write-Host "`nManagement Source" -ForegroundColor Yellow
+    Write-Host "  Effective:      $($m.EffectiveSource)" -ForegroundColor White
+    Write-Host "  Confidence:     $($m.Confidence)" -ForegroundColor Gray
+    Write-Host "  Co-managed:     $($m.IsCoManaged)" -ForegroundColor Gray
+    Write-Host "  Editable local: $($m.EditableLocally)" -ForegroundColor Gray
+    Write-Host "  Override risk:  $($m.OverrideRisk)" -ForegroundColor Gray
+    if ($m.SourcesDetected.Count -gt 0) {
+        Write-Host "  Detected:       $($m.SourcesDetected -join ', ')" -ForegroundColor Gray
+    }
+
+    Write-Host "`nWindows Update Policy State" -ForegroundColor Yellow
+    Write-Host "  UseWUServer:    $($c.UseWUServer)" -ForegroundColor Gray
+    Write-Host "  WUServer:       $($c.WUServer)" -ForegroundColor Gray
+    Write-Host "  WUStatusServer: $($c.WUStatusServer)" -ForegroundColor Gray
+    Write-Host "  Block Internet: $($c.DoNotConnectToWindowsUpdateInternetLocations)" -ForegroundColor Gray
+    Write-Host "  Feature Deferral: $($c.DeferFeatureUpdates) / Days=$($c.DeferFeatureUpdatesPeriodInDays)" -ForegroundColor Gray
+    Write-Host "  Quality Deferral: $($c.DeferQualityUpdates) / Days=$($c.DeferQualityUpdatesPeriodInDays)" -ForegroundColor Gray
+    Write-Host "  BranchReadiness:  $($c.BranchReadinessLevel)" -ForegroundColor Gray
+
+    Write-Host "`nActive Hours" -ForegroundColor Yellow
+    Write-Host "  Start:          $($a.StartHour)" -ForegroundColor Gray
+    Write-Host "  End:            $($a.EndHour)" -ForegroundColor Gray
+    Write-Host "  Smart Active:   $($a.SmartActiveHoursEnabled)" -ForegroundColor Gray
+    Write-Host "  Editable:       $($a.Editable)" -ForegroundColor Gray
+
+    Write-Host "`nMetered Downloads" -ForegroundColor Yellow
+    Write-Host "  Allow auto download over metered: $($metered.AllowAutoWindowsUpdateDownloadOverMeteredNetwork)" -ForegroundColor Gray
+    Write-Host "  Editable:       $($metered.Editable)" -ForegroundColor Gray
+
+    Write-Host "`nSystem State" -ForegroundColor Yellow
+    Write-Host "  Reboot Required: $($s.RebootRequired)" -ForegroundColor Gray
+    foreach ($svc in $s.Services) {
+        Write-Host "  Service $($svc.Name): $($svc.Status) (StartType=$($svc.StartType))" -ForegroundColor Gray
+    }
+
+    Write-Host "`nRecent Installed Updates" -ForegroundColor Yellow
+    if ($h.Recent.Count -gt 0) {
+        $i = 1
+        foreach ($item in $h.Recent) {
+            $dateText = if ($item.Date) { try { (Get-Date $item.Date -Format 'yyyy-MM-dd HH:mm') } catch { "$($item.Date)" } } else { '(unknown)' }
+            Write-Host ("  [{0}] {1}  {2}" -f $i, $dateText, $item.Title) -ForegroundColor Gray
+            $i++
+        }
+    } else {
+        Write-Host "  (No history available)" -ForegroundColor Gray
+    }
+
+    Write-Host "`nEvidence (Top signals)" -ForegroundColor Yellow
+    if ($m.Evidence.Count -gt 0) {
+        $m.Evidence |
+            Sort-Object Weight -Descending |
+            Select-Object -First 8 |
+            ForEach-Object {
+                Write-Host "  [$($_.Category)] $($_.Signal) = $($_.Value) (Weight=$($_.Weight))" -ForegroundColor Gray
+            }
+    } else {
+        Write-Host "  (No strong management evidence found)" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+}
+
+function Get-WUSettingsCatalog {
+    [CmdletBinding()]
+    param()
+
+    @(
+        [pscustomobject]@{ Id='AU.UseWUServer'; Path=$auPolicyPath; Name='UseWUServer'; Type='DWord'; Category='Source'; Editable=$true; Responsibility='Download source selection'; Description='Controls whether Automatic Updates uses a WSUS server (1) or Windows Update/Microsoft service endpoints (0).' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.WUServer'; Path=$wuPolicyPath; Name='WUServer'; Type='String'; Category='Source'; Editable=$true; Responsibility='Update discovery/download source'; Description='WSUS server URL used for update discovery and content retrieval when UseWUServer=1.' ; ValidValues='URL or blank' }
+        [pscustomobject]@{ Id='WU.WUStatusServer'; Path=$wuPolicyPath; Name='WUStatusServer'; Type='String'; Category='Source'; Editable=$true; Responsibility='Reporting target'; Description='WSUS reporting/status URL used by the client when WSUS is enabled.' ; ValidValues='URL or blank' }
+        [pscustomobject]@{ Id='WU.DoNotConnectToWindowsUpdateInternetLocations'; Path=$wuPolicyPath; Name='DoNotConnectToWindowsUpdateInternetLocations'; Type='DWord'; Category='Connectivity'; Editable=$true; Responsibility='Internet endpoint access'; Description='Blocks direct access to Microsoft Windows Update internet locations when enabled (1).' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.DisableDualScan'; Path=$wuPolicyPath; Name='DisableDualScan'; Type='DWord'; Category='Connectivity'; Editable=$true; Responsibility='Scan source behavior'; Description='Legacy control that affects whether the device scans Microsoft Update while WSUS policies are present.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.AllowAutoWindowsUpdateDownloadOverMeteredNetwork'; Path=$wuPolicyPath; Name='AllowAutoWindowsUpdateDownloadOverMeteredNetwork'; Type='DWord'; Category='Downloads'; Editable=$true; Responsibility='Download behavior on metered links'; Description='Allows or blocks automatic Windows Update downloads when the current network is metered.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.ExcludeWUDriversInQualityUpdate'; Path=$wuPolicyPath; Name='ExcludeWUDriversInQualityUpdate'; Type='DWord'; Category='Content'; Editable=$true; Responsibility='Content selection'; Description='When enabled, excludes driver updates from Windows Update quality update scans/install offers.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.DeferFeatureUpdates'; Path=$wuPolicyPath; Name='DeferFeatureUpdates'; Type='DWord'; Category='Servicing'; Editable=$true; Responsibility='Feature update installation timing'; Description='Enables feature update deferral policy. Must be 1 for DeferFeatureUpdatesPeriodinDays to take effect.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.DeferFeatureUpdatesPeriodinDays'; Path=$wuPolicyPath; Name='DeferFeatureUpdatesPeriodinDays'; Type='DWord'; Category='Servicing'; Editable=$true; Responsibility='Feature update install timing'; Description='Number of days to defer feature updates after release.' ; ValidValues='0-365' }
+        [pscustomobject]@{ Id='WU.DeferQualityUpdates'; Path=$wuPolicyPath; Name='DeferQualityUpdates'; Type='DWord'; Category='Servicing'; Editable=$true; Responsibility='Quality update installation timing'; Description='Enables quality update deferral policy. Must be 1 for DeferQualityUpdatesPeriodinDays to take effect.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.DeferQualityUpdatesPeriodinDays'; Path=$wuPolicyPath; Name='DeferQualityUpdatesPeriodinDays'; Type='DWord'; Category='Servicing'; Editable=$true; Responsibility='Quality update install timing'; Description='Number of days to defer quality updates after release.' ; ValidValues='0-30' }
+        [pscustomobject]@{ Id='WU.BranchReadinessLevel'; Path=$wuPolicyPath; Name='BranchReadinessLevel'; Type='DWord'; Category='Servicing'; Editable=$true; Responsibility='Feature update channel selection'; Description='Legacy servicing channel / branch readiness level (e.g., GA, Release Preview, Insider rings).' ; ValidValues='2,4,8,32' }
+        [pscustomobject]@{ Id='WU.PauseFeatureUpdatesStartTime'; Path=$wuPolicyPath; Name='PauseFeatureUpdatesStartTime'; Type='String'; Category='Servicing'; Editable=$true; Responsibility='Feature update install pause'; Description='Start time marker for paused feature updates. Clearing it resumes paused feature updates.' ; ValidValues='DateTime string or blank' }
+        [pscustomobject]@{ Id='WU.PauseQualityUpdatesStartTime'; Path=$wuPolicyPath; Name='PauseQualityUpdatesStartTime'; Type='String'; Category='Servicing'; Editable=$true; Responsibility='Quality update install pause'; Description='Start time marker for paused quality updates. Clearing it resumes paused quality updates.' ; ValidValues='DateTime string or blank' }
+        [pscustomobject]@{ Id='WU.TargetReleaseVersion'; Path=$wuPolicyPath; Name='TargetReleaseVersion'; Type='DWord'; Category='Servicing'; Editable=$true; Responsibility='Feature version targeting'; Description='Enables targeting a specific Windows release version when paired with ProductVersion/TargetReleaseVersionInfo.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='WU.TargetReleaseVersionInfo'; Path=$wuPolicyPath; Name='TargetReleaseVersionInfo'; Type='String'; Category='Servicing'; Editable=$true; Responsibility='Feature version targeting'; Description='Target Windows release version (example: 23H2) used when TargetReleaseVersion=1.' ; ValidValues='Version label or blank' }
+        [pscustomobject]@{ Id='WU.ProductVersion'; Path=$wuPolicyPath; Name='ProductVersion'; Type='String'; Category='Servicing'; Editable=$true; Responsibility='Feature version targeting'; Description='Product family targeted by release version policy (example: Windows 10 or Windows 11).' ; ValidValues='Product string or blank' }
+        [pscustomobject]@{ Id='WU.SetAutoRestartNotificationDisable'; Path=$wuPolicyPath; Name='SetAutoRestartNotificationDisable'; Type='DWord'; Category='Restart UX'; Editable=$true; Responsibility='Restart notification behavior'; Description='Controls auto-restart notification behavior for updates that require a restart.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='AU.NoAutoUpdate'; Path=$auPolicyPath; Name='NoAutoUpdate'; Type='DWord'; Category='Automatic Updates'; Editable=$true; Responsibility='Discovery/download/install automation'; Description='Disables Automatic Updates when set to 1. Device may still allow manual scanning/install depending on other policies.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='AU.AUOptions'; Path=$auPolicyPath; Name='AUOptions'; Type='DWord'; Category='Automatic Updates'; Editable=$true; Responsibility='Discovery/download/install mode'; Description='Defines automatic update behavior (notify/download/schedule). Common values: 2 notify, 3 auto download notify install, 4 auto download schedule install.' ; ValidValues='2,3,4,5,7 (OS-dependent)' }
+        [pscustomobject]@{ Id='AU.ScheduledInstallDay'; Path=$auPolicyPath; Name='ScheduledInstallDay'; Type='DWord'; Category='Scheduling'; Editable=$true; Responsibility='Scheduled installation day'; Description='Scheduled install day for AUOptions=4. 0=Every day, 1-7=Sunday-Saturday.' ; ValidValues='0-7' }
+        [pscustomobject]@{ Id='AU.ScheduledInstallTime'; Path=$auPolicyPath; Name='ScheduledInstallTime'; Type='DWord'; Category='Scheduling'; Editable=$true; Responsibility='Scheduled installation hour'; Description='Scheduled install hour for AUOptions=4 in 24-hour format.' ; ValidValues='0-23' }
+        [pscustomobject]@{ Id='AU.NoAutoRebootWithLoggedOnUsers'; Path=$auPolicyPath; Name='NoAutoRebootWithLoggedOnUsers'; Type='DWord'; Category='Restart'; Editable=$true; Responsibility='Install/restart enforcement'; Description='Prevents automatic restart for scheduled installations when a user is logged on.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='AU.AlwaysAutoRebootAtScheduledTime'; Path=$auPolicyPath; Name='AlwaysAutoRebootAtScheduledTime'; Type='DWord'; Category='Restart'; Editable=$true; Responsibility='Install/restart enforcement'; Description='Forces automatic restart at the scheduled time after installation when enabled (legacy policy).' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='AU.AlwaysAutoRebootAtScheduledTimeMinutes'; Path=$auPolicyPath; Name='AlwaysAutoRebootAtScheduledTimeMinutes'; Type='DWord'; Category='Restart'; Editable=$true; Responsibility='Install/restart enforcement timing'; Description='Minutes delay before forced reboot when AlwaysAutoRebootAtScheduledTime is enabled.' ; ValidValues='1-180 (common)' }
+        [pscustomobject]@{ Id='AU.DetectionFrequencyEnabled'; Path=$auPolicyPath; Name='DetectionFrequencyEnabled'; Type='DWord'; Category='Scanning'; Editable=$true; Responsibility='Discovery cadence'; Description='Enables custom detection frequency for update scans.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='AU.DetectionFrequency'; Path=$auPolicyPath; Name='DetectionFrequency'; Type='DWord'; Category='Scanning'; Editable=$true; Responsibility='Discovery cadence'; Description='Custom update detection frequency in hours when DetectionFrequencyEnabled=1.' ; ValidValues='1-22' }
+        [pscustomobject]@{ Id='AU.RebootWarningTimeoutEnabled'; Path=$auPolicyPath; Name='RebootWarningTimeoutEnabled'; Type='DWord'; Category='Restart UX'; Editable=$true; Responsibility='Restart warning timing'; Description='Enables custom restart warning timeout before automatic restart.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='AU.RebootWarningTimeout'; Path=$auPolicyPath; Name='RebootWarningTimeout'; Type='DWord'; Category='Restart UX'; Editable=$true; Responsibility='Restart warning timing'; Description='Minutes users are warned before automatic restart when enabled.' ; ValidValues='1-30 (common)' }
+        [pscustomobject]@{ Id='AU.RebootRelaunchTimeoutEnabled'; Path=$auPolicyPath; Name='RebootRelaunchTimeoutEnabled'; Type='DWord'; Category='Restart UX'; Editable=$true; Responsibility='Restart reminder timing'; Description='Enables custom timeout before restart prompts are shown again.' ; ValidValues='0 or 1' }
+        [pscustomobject]@{ Id='AU.RebootRelaunchTimeout'; Path=$auPolicyPath; Name='RebootRelaunchTimeout'; Type='DWord'; Category='Restart UX'; Editable=$true; Responsibility='Restart reminder timing'; Description='Minutes before restart notification reappears when enabled.' ; ValidValues='1-1440 (common)' }
+        [pscustomobject]@{ Id='UX.ActiveHoursStart'; Path='HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'; Name='ActiveHoursStart'; Type='DWord'; Category='Active Hours'; Editable=$true; Responsibility='Install/restart window'; Description='Beginning of active hours. Windows tries to avoid automatic restarts during this time.' ; ValidValues='0-23' }
+        [pscustomobject]@{ Id='UX.ActiveHoursEnd'; Path='HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'; Name='ActiveHoursEnd'; Type='DWord'; Category='Active Hours'; Editable=$true; Responsibility='Install/restart window'; Description='End of active hours. Windows may restart outside this window when required.' ; ValidValues='0-23' }
+        [pscustomobject]@{ Id='UX.SmartActiveHoursState'; Path='HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'; Name='SmartActiveHoursState'; Type='DWord'; Category='Active Hours'; Editable=$true; Responsibility='Install/restart window automation'; Description='Controls whether Windows dynamically adjusts active hours based on device usage patterns (build-dependent).' ; ValidValues='0 or 1 (build-dependent)' }
+    )
+}
+
+function Get-RegistrySettingValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $item = Get-ItemProperty -Path $Path -ErrorAction SilentlyContinue
+    if (-not $item) { return $null }
+    if ($item.PSObject.Properties.Name -contains $Name) { return $item.$Name }
+    return $null
+}
+
+function Get-WUSettingsInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [array]$Catalog
+    )
+
+    $Catalog | ForEach-Object {
+        $value = Get-RegistrySettingValue -Path $_.Path -Name $_.Name
+        [pscustomobject]@{
+            Id = $_.Id
+            Category = $_.Category
+            Responsibility = $_.Responsibility
+            Description = $_.Description
+            ValidValues = $_.ValidValues
+            Path = $_.Path
+            Name = $_.Name
+            Type = $_.Type
+            Editable = $_.Editable
+            Value = $value
+            IsSet = $null -ne $value
+        }
+    }
+}
+
+function Format-WUSettingValue {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value) { return '(not set)' }
+    if ($Value -is [array]) { return ($Value -join ', ') }
+    return [string]$Value
+}
+
+function ConvertTo-WUSettingValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Setting,
+        [Parameter(Mandatory)]
+        [string]$RawValue
+    )
+
+    if ($RawValue -eq '') {
+        return [pscustomobject]@{ Clear = $true; Value = $null }
+    }
+
+    switch ($Setting.Type) {
+        'DWord' {
+            if ($RawValue -notmatch '^-?\d+$') {
+                throw "Value must be an integer for $($Setting.Id)"
+            }
+            return [pscustomobject]@{ Clear = $false; Value = [int]$RawValue }
+        }
+        default {
+            return [pscustomobject]@{ Clear = $false; Value = $RawValue }
+        }
+    }
+}
+
+function Set-WURegistryCatalogSetting {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Setting,
+        [Parameter(Mandatory)]
+        [string]$RawValue
+    )
+
+    $converted = ConvertTo-WUSettingValue -Setting $Setting -RawValue $RawValue
+
+    if (-not (Test-Path $Setting.Path)) {
+        New-Item -Path $Setting.Path -Force | Out-Null
+    }
+
+    if ($converted.Clear) {
+        Remove-ItemProperty -Path $Setting.Path -Name $Setting.Name -ErrorAction SilentlyContinue
+        Write-WUFBLog -Message "Cleared setting $($Setting.Id) ($($Setting.Path)\$($Setting.Name))" -Type 1
+        return $null
+    }
+
+    Set-ItemProperty -Path $Setting.Path -Name $Setting.Name -Value $converted.Value -Type $Setting.Type -ErrorAction Stop
+    Write-WUFBLog -Message "Set $($Setting.Id) = $($converted.Value)" -Type 1
+    return $converted.Value
+}
+
+function Write-WUSettingsReferenceMarkdown {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Dashboard,
+        [Parameter()]
+        [string]$ChangedSettingId,
+        [Parameter()]
+        [object]$ChangedValue
+    )
+
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $fileName = "WU-Settings-Reference_$timestamp.md"
+    $outputPath = Join-Path -Path (Get-Location) -ChildPath $fileName
+
+    $catalog = @($Dashboard.SettingsCatalog)
+    $inventory = @($Dashboard.SettingsInventory)
+    $mgmt = $Dashboard.Management
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("# Windows Update Settings Reference")
+    $lines.Add("")
+    $lines.Add("- Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
+    $lines.Add("- Computer: $($Dashboard.ComputerName)")
+    $lines.Add("- Effective management source: $($mgmt.EffectiveSource)")
+    $lines.Add("- Confidence: $($mgmt.Confidence)")
+    $lines.Add("- Override risk: $($mgmt.OverrideRisk)")
+    if ($ChangedSettingId) {
+        $lines.Add("- Changed this run: `$ChangedSettingId` = `$(Format-WUSettingValue -Value $ChangedValue)`")
+    }
+    $lines.Add("")
+    $lines.Add("## How To Read This")
+    $lines.Add("")
+    $lines.Add("- `Responsibility` explains what part of the update lifecycle the setting affects (discovery, download, install, restart, etc.).")
+    $lines.Add("- `Current Value` shows what is currently set in the registry path used by this tool.")
+    $lines.Add("- If a device is managed by SCCM, Intune/MDM, or domain Group Policy, local changes may be overwritten.")
+    $lines.Add("")
+    $lines.Add("## Current Management Summary")
+    $lines.Add("")
+    $lines.Add("- Effective source: **$($mgmt.EffectiveSource)**")
+    $lines.Add("- Co-managed: **$($mgmt.IsCoManaged)**")
+    $lines.Add("- Editable locally: **$($mgmt.EditableLocally)**")
+    if ($mgmt.SourcesDetected.Count -gt 0) {
+        $lines.Add("- Detected sources: $($mgmt.SourcesDetected -join ', ')")
+    }
+    $lines.Add("")
+    $lines.Add("## Settings")
+    $lines.Add("")
+    $lines.Add("| ID | Current Value | Registry Path | Type | Responsibility | What It Does | Typical Values |")
+    $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
+
+    foreach ($inv in ($inventory | Sort-Object Category, Id)) {
+        $currentValue = (Format-WUSettingValue -Value $inv.Value) -replace '\|', '\|'
+        $description = ($inv.Description -replace '\|', '\|')
+        $validValues = ($inv.ValidValues -replace '\|', '\|')
+        $responsibility = ($inv.Responsibility -replace '\|', '\|')
+        $pathName = ("{0}\{1}" -f $inv.Path, $inv.Name) -replace '\|', '\|'
+        $lines.Add("| `$($inv.Id)` | `$currentValue` | `$pathName` | `$($inv.Type)` | $responsibility | $description | $validValues |")
+    }
+
+    $lines.Add("")
+    $lines.Add("## Evidence Used To Detect Management Source")
+    $lines.Add("")
+    if ($mgmt.Evidence.Count -eq 0) {
+        $lines.Add("- No strong evidence signals found.")
+    } else {
+        foreach ($ev in ($mgmt.Evidence | Sort-Object Weight -Descending, Category, Signal)) {
+            $lines.Add("- **[$($ev.Category)]** `$($ev.Signal)` = `$($ev.Value)` (`Weight=$($ev.Weight)`) - $($ev.Notes)")
+        }
+    }
+
+    Set-Content -Path $outputPath -Value $lines -Encoding UTF8 -ErrorAction Stop
+    Write-WUFBLog -Message "Generated settings reference markdown: $outputPath" -Type 1
+    return $outputPath
+}
+
+function Show-WUSettingsEditor {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Dashboard
+    )
+
+    while ($true) {
+        $inventory = @($Dashboard.SettingsInventory | Sort-Object Category, Id)
+        Write-Host "`nEditable Windows Update Settings" -ForegroundColor Cyan
+        Write-Host ("=" * 80) -ForegroundColor Gray
+
+        $indexMap = @{}
+        $i = 1
+        foreach ($setting in $inventory) {
+            $indexMap[[string]$i] = $setting.Id
+            $valueText = Format-WUSettingValue -Value $setting.Value
+            Write-Host ("[{0,2}] {1} = {2}" -f $i, $setting.Id, $valueText) -ForegroundColor Gray
+            Write-Host ("      {0} | {1}" -f $setting.Responsibility, $setting.Description) -ForegroundColor DarkGray
+            $i++
+        }
+
+        Write-Host ""
+        Write-Host "Select a setting number to edit, [D]oc export, or [Q]uit editor." -ForegroundColor Yellow
+        $selection = (Read-Host 'Selection').Trim()
+        if ([string]::IsNullOrWhiteSpace($selection)) { continue }
+        if ($selection.ToUpperInvariant() -eq 'Q') { return 'Back' }
+        if ($selection.ToUpperInvariant() -eq 'D') {
+            try {
+                $docPath = Write-WUSettingsReferenceMarkdown -Dashboard $Dashboard
+                Write-Host "Created: $docPath" -ForegroundColor Green
+                return 'Refresh'
+            } catch {
+                Write-Host "Failed to create markdown: $($_.Exception.Message)" -ForegroundColor Red
+                Write-WUFBLog -Message "Failed markdown export: $($_.Exception.Message)" -Type 3
+                continue
+            }
+        }
+
+        if (-not $indexMap.ContainsKey($selection)) {
+            Write-Host "Invalid selection." -ForegroundColor Yellow
+            continue
+        }
+
+        $settingId = $indexMap[$selection]
+        $setting = $inventory | Where-Object { $_.Id -eq $settingId } | Select-Object -First 1
+        if (-not $setting) {
+            Write-Host "Setting lookup failed." -ForegroundColor Red
+            continue
+        }
+
+        Write-Host "`nEditing $($setting.Id)" -ForegroundColor Cyan
+        Write-Host "Current value: $(Format-WUSettingValue -Value $setting.Value)" -ForegroundColor Gray
+        Write-Host "Registry: $($setting.Path)\$($setting.Name)" -ForegroundColor Gray
+        Write-Host "Type: $($setting.Type)" -ForegroundColor Gray
+        Write-Host "Responsibility: $($setting.Responsibility)" -ForegroundColor Gray
+        Write-Host "What it does: $($setting.Description)" -ForegroundColor Gray
+        Write-Host "Typical values: $($setting.ValidValues)" -ForegroundColor Gray
+        Write-Host "Enter a new value. Submit an empty value to clear/remove the setting." -ForegroundColor Yellow
+
+        $newRawValue = Read-Host 'New value'
+        try {
+            $newValue = Set-WURegistryCatalogSetting -Setting $setting -RawValue $newRawValue
+            Write-Host "Updated $($setting.Id) to $(Format-WUSettingValue -Value $newValue)." -ForegroundColor Green
+
+            $refresh = Get-WUDashboardData -HistoryTop $HistoryTop
+            try {
+                $docPath = Write-WUSettingsReferenceMarkdown -Dashboard $refresh -ChangedSettingId $setting.Id -ChangedValue $newValue
+                Write-Host "Created settings reference: $docPath" -ForegroundColor Green
+            } catch {
+                Write-Host "Setting changed, but markdown generation failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                Write-WUFBLog -Message "Setting changed but markdown generation failed: $($_.Exception.Message)" -Type 2
+            }
+            return 'Refresh'
+        } catch {
+            Write-Host "Failed to update setting: $($_.Exception.Message)" -ForegroundColor Red
+            Write-WUFBLog -Message "Failed to update setting $($setting.Id): $($_.Exception.Message)" -Type 3
+        }
+    }
+}
+
+function Read-ValidatedHour {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Prompt
+    )
+
+    while ($true) {
+        $raw = Read-Host $Prompt
+        if ($raw -match '^\d+$') {
+            $value = [int]$raw
+            if ($value -ge 0 -and $value -le 23) { return $value }
+        }
+        Write-Host "Enter an hour from 0-23." -ForegroundColor Yellow
+    }
+}
+
+function Set-WUActiveHours {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateRange(0, 23)]
+        [int]$StartHour,
+        [Parameter(Mandatory)]
+        [ValidateRange(0, 23)]
+        [int]$EndHour
+    )
+
+    $uxPath = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+    if (-not (Test-Path $uxPath)) {
+        New-Item -Path $uxPath -Force | Out-Null
+    }
+
+    Set-ItemProperty -Path $uxPath -Name 'ActiveHoursStart' -Value $StartHour -Type DWord -ErrorAction Stop
+    Set-ItemProperty -Path $uxPath -Name 'ActiveHoursEnd' -Value $EndHour -Type DWord -ErrorAction Stop
+    Write-WUFBLog -Message "Set active hours: Start=$StartHour End=$EndHour" -Type 1
+}
+
+function Set-WUMeteredDownloadBehavior {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet(0, 1)]
+        [int]$Allow
+    )
+
+    if (-not (Test-Path $wuPolicyPath)) {
+        New-Item -Path $wuPolicyPath -Force | Out-Null
+    }
+
+    Set-ItemProperty -Path $wuPolicyPath -Name 'AllowAutoWindowsUpdateDownloadOverMeteredNetwork' -Value $Allow -Type DWord -ErrorAction Stop
+    Write-WUFBLog -Message "Set AllowAutoWindowsUpdateDownloadOverMeteredNetwork=$Allow" -Type 1
+}
+
+function Show-WUDashboardMenu {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject]$Dashboard
+    )
+
+    while ($true) {
+        Write-Host "Options:" -ForegroundColor Cyan
+        Write-Host "  [R] Refresh dashboard" -ForegroundColor Gray
+        Write-Host "  [E] Show evidence details" -ForegroundColor Gray
+        Write-Host "  [H] Change active hours" -ForegroundColor Gray
+        Write-Host "  [M] Change metered download setting" -ForegroundColor Gray
+        Write-Host "  [W] Continue to existing WUFB configuration flow" -ForegroundColor Gray
+        Write-Host "  [Q] Quit" -ForegroundColor Gray
+
+        $choice = (Read-Host "Select").Trim().ToUpperInvariant()
+        switch ($choice) {
+            'R' { return 'Refresh' }
+            'E' {
+                Write-Host "`nFull Evidence" -ForegroundColor Yellow
+                $Dashboard.Management.Evidence | Sort-Object Category, Signal | Format-Table Category, Signal, Value, Path, Weight, Notes -AutoSize
+            }
+            'H' {
+                try {
+                    $startHour = Read-ValidatedHour -Prompt 'Active hours start (0-23)'
+                    $endHour = Read-ValidatedHour -Prompt 'Active hours end (0-23)'
+                    Set-WUActiveHours -StartHour $startHour -EndHour $endHour
+                    Write-Host "Active hours updated." -ForegroundColor Green
+                    return 'Refresh'
+                } catch {
+                    Write-Host "Failed to set active hours: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-WUFBLog -Message "Failed to set active hours: $($_.Exception.Message)" -Type 3
+                }
+            }
+            'M' {
+                Write-Host "  [0] Do not allow auto-download over metered networks" -ForegroundColor Gray
+                Write-Host "  [1] Allow auto-download over metered networks" -ForegroundColor Gray
+                $meteredChoice = (Read-Host 'Select 0 or 1').Trim()
+                if ($meteredChoice -notin @('0', '1')) {
+                    Write-Host "Invalid selection." -ForegroundColor Yellow
+                    continue
+                }
+                try {
+                    Set-WUMeteredDownloadBehavior -Allow ([int]$meteredChoice)
+                    Write-Host "Metered download behavior updated." -ForegroundColor Green
+                    return 'Refresh'
+                } catch {
+                    Write-Host "Failed to set metered download behavior: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-WUFBLog -Message "Failed to set metered download behavior: $($_.Exception.Message)" -Type 3
+                }
+            }
+            'W' { return 'Continue' }
+            'Q' { return 'Quit' }
+            default { Write-Host "Invalid selection." -ForegroundColor Yellow }
+        }
+    }
+}
+
 # ============================================================================
 # MAIN SCRIPT
 # ============================================================================
@@ -389,6 +1229,43 @@ if ($logPath) {
     Write-Host "   (CMTrace-compatible format - open with CMTrace or OneTrace)" -ForegroundColor Gray
 } else {
     Write-Host "`n⚠️  Logging disabled (could not create log file)" -ForegroundColor Yellow
+}
+
+# ============================================================================
+# DISCOVERY DASHBOARD (NEW)
+# ============================================================================
+$dashboard = Get-WUDashboardData -HistoryTop $HistoryTop
+Show-WUDashboard -Dashboard $dashboard
+Write-WUFBLog -Message "Discovery dashboard shown: EffectiveSource=$($dashboard.Management.EffectiveSource), Confidence=$($dashboard.Management.Confidence), OverrideRisk=$($dashboard.Management.OverrideRisk)" -Type 1
+
+if ($ViewOnly) {
+    Write-WUFBLog -Message "ViewOnly requested; exiting after dashboard" -Type 1
+    Complete-WUFBLog -Success $true
+    return
+}
+
+if ($Interactive) {
+    while ($true) {
+        $dashboardAction = Show-WUDashboardMenu -Dashboard $dashboard
+        switch ($dashboardAction) {
+            'Refresh' {
+                $dashboard = Get-WUDashboardData -HistoryTop $HistoryTop
+                Show-WUDashboard -Dashboard $dashboard
+                continue
+            }
+            'Quit' {
+                Write-WUFBLog -Message "User exited from discovery dashboard" -Type 1
+                Complete-WUFBLog -Success $true
+                return
+            }
+            'Continue' {
+                break
+            }
+            default {
+                break
+            }
+        }
+    }
 }
 
 # ============================================================================
