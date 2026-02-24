@@ -3,200 +3,382 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Intune Device Only Viewer</title>
+  <title>Intune Device Test Viewer</title>
   <style>
     :root {
-      --bg: #f4f6f8;
+      --bg: #edf2f6;
       --panel: #ffffff;
-      --ink: #1d232a;
-      --muted: #66717d;
-      --line: #d9e0e6;
-      --ok: #0f9d58;
-      --warn: #b26a00;
-      --bad: #c62828;
-      --accent: #005a9c;
+      --ink: #16202a;
+      --muted: #5f6f7f;
+      --line: #d8e0e7;
+      --accent: #0b5cab;
+      --accent-2: #0f8b8d;
+      --ok-bg: #e8f7ee;
+      --ok: #1b6f44;
+      --bad-bg: #fdeced;
+      --bad: #a1272f;
+      --warn-bg: #fff4df;
+      --warn: #8a5a00;
+      --code-bg: #0f1720;
+      --code-ink: #dbe8f6;
+      --shadow: 0 10px 24px rgba(11, 20, 32, .05);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: "Segoe UI", Tahoma, sans-serif;
-      background: linear-gradient(180deg, #eef3f7 0%, #f7f9fb 100%);
       color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 0%, #dfeef9 0%, transparent 40%),
+        radial-gradient(circle at 100% 0%, #e6f8f7 0%, transparent 35%),
+        var(--bg);
     }
-    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    .hero {
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 18px; }
+    .hero, .panel {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 14px;
-      padding: 18px;
-      margin-bottom: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.04);
+      box-shadow: var(--shadow);
     }
-    h1 { margin: 0 0 8px; font-size: 22px; }
+    .hero { padding: 18px; margin-bottom: 14px; }
+    h1 { margin: 0; font-size: 22px; }
+    h2 { margin: 0 0 10px; font-size: 16px; }
     .muted { color: var(--muted); }
+    .sub { margin-top: 6px; }
     .drop {
-      border: 2px dashed #9fb6cc;
+      margin-top: 14px;
+      border: 2px dashed #9fb8cf;
       border-radius: 12px;
-      padding: 18px;
-      background: #fbfdff;
+      padding: 14px;
       display: grid;
-      gap: 10px;
-      justify-items: start;
+      gap: 8px;
+      background: #fbfdff;
     }
-    .drop.drag { background: #eef7ff; border-color: var(--accent); }
-    input[type="file"] { display: none; }
+    .drop.drag { border-color: var(--accent); background: #eef6ff; }
+    input[type=file] { display: none; }
     .btn {
-      background: var(--accent);
+      border: 0;
+      background: linear-gradient(135deg, var(--accent), #1f73c5);
       color: #fff;
-      border: none;
-      border-radius: 8px;
+      font-weight: 700;
+      border-radius: 9px;
       padding: 10px 14px;
       cursor: pointer;
-      font-weight: 600;
+      width: fit-content;
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(12, 1fr);
       gap: 12px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 14px;
-    }
-    .span-4 { grid-column: span 4; }
-    .span-6 { grid-column: span 6; }
+    .panel { padding: 14px; }
     .span-12 { grid-column: span 12; }
-    .metric { font-size: 26px; font-weight: 700; line-height: 1.1; }
-    .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .span-8 { grid-column: span 8; }
+    .span-6 { grid-column: span 6; }
+    .span-4 { grid-column: span 4; }
+    .span-3 { grid-column: span 3; }
+    .metricCard {
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff, #fbfdff);
+    }
+    .metricLabel {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .metricValue { font-size: 24px; font-weight: 700; line-height: 1.1; }
+    .metricSub { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .kv {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 7px 10px;
+      font-size: 13px;
+    }
+    .kv .k { color: var(--muted); }
+    code.inline {
+      background: #f2f6fa;
+      border: 1px solid #e2e9f0;
+      border-radius: 6px;
+      padding: 1px 6px;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 12px;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .toolbar input, .toolbar select {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #fff;
+      color: var(--ink);
+    }
     table {
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
+      table-layout: fixed;
     }
     th, td {
-      text-align: left;
-      padding: 8px 10px;
       border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
       vertical-align: top;
+      overflow-wrap: anywhere;
     }
-    th { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+    th {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      background: #fbfdff;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .tableWrap {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: auto;
+      max-height: 420px;
+    }
     .pill {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       border-radius: 999px;
-      padding: 2px 8px;
+      padding: 3px 9px;
       font-size: 12px;
       font-weight: 700;
+      white-space: nowrap;
     }
-    .pill.ok { background: #e7f6ee; color: #156f43; }
-    .pill.bad { background: #fdecec; color: #9b2020; }
-    .pill.warn { background: #fff2db; color: #8a5600; }
-    .kv { display: grid; grid-template-columns: 220px 1fr; gap: 6px 10px; font-size: 13px; }
-    .kv div:nth-child(odd) { color: var(--muted); }
+    .ok { background: var(--ok-bg); color: var(--ok); }
+    .bad { background: var(--bad-bg); color: var(--bad); }
+    .warn { background: var(--warn-bg); color: var(--warn); }
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      color: #134d70;
+      background: #e9f4fb;
+      border: 1px solid #cce4f4;
+      padding: 2px 7px;
+      border-radius: 999px;
+      margin-left: 6px;
+    }
+    .noteList { margin: 0; padding-left: 18px; color: var(--muted); }
+    .empty {
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      color: var(--muted);
+      background: #fcfdff;
+      font-size: 13px;
+    }
     details {
       border: 1px solid var(--line);
       border-radius: 10px;
       background: #fff;
-      margin-top: 10px;
+      margin-top: 8px;
+      overflow: hidden;
     }
     summary {
       cursor: pointer;
       padding: 10px 12px;
       font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .summaryLeft { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .summaryText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rawTools {
+      display: flex;
+      gap: 8px;
+      padding: 8px 12px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #f9fbfd;
+      align-items: center;
+    }
+    .rawTools button {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 5px 8px;
+      cursor: pointer;
+      font-size: 12px;
     }
     pre {
       margin: 0;
       padding: 12px;
       overflow: auto;
+      background: var(--code-bg);
+      color: var(--code-ink);
       font-size: 12px;
-      background: #0f1720;
-      color: #dbe7f3;
-      border-top: 1px solid var(--line);
-      border-radius: 0 0 10px 10px;
       max-height: 360px;
     }
-    .hidden { display: none; }
-    @media (max-width: 900px) {
-      .span-4, .span-6 { grid-column: span 12; }
+    .hidden { display: none !important; }
+    .twoCol {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 12px;
+    }
+    .statline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .chip {
+      font-size: 11px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #f7fafc;
+      color: var(--muted);
+      padding: 3px 8px;
+    }
+    @media (max-width: 980px) {
+      .span-8, .span-6, .span-4, .span-3 { grid-column: span 12; }
       .kv { grid-template-columns: 1fr; }
+      .toolbar { grid-template-columns: 1fr; }
+      .twoCol { grid-template-columns: 1fr; }
+      th:nth-child(4), td:nth-child(4) { display: none; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="hero">
-      <h1>Intune Device Only Viewer</h1>
-      <div class="muted">Load an <code>IntuneDeviceOnly_*.json</code> file generated by <code>tests/Test-IntuneDeviceOnly.ps1</code>.</div>
-      <div id="drop" class="drop" style="margin-top:12px;">
-        <label class="btn" for="fileInput">Choose JSON File</label>
+      <h1>Intune Device Test Viewer</h1>
+      <div class="sub muted">Load <code class="inline">IntuneDeviceOnly_*.json</code> generated by <code class="inline">tests/Test-IntuneDeviceOnly.ps1</code>.</div>
+      <div id="drop" class="drop">
+        <label class="btn" for="fileInput">Choose Summary JSON</label>
         <input id="fileInput" type="file" accept=".json,application/json">
-        <div class="muted">Or drag and drop the summary JSON here.</div>
+        <div class="muted">Drag and drop the JSON here, or use the button above.</div>
         <div id="fileName" class="muted"></div>
       </div>
     </div>
 
     <div id="content" class="hidden">
       <div class="grid">
-        <div class="card span-4">
-          <div class="label">Device</div>
-          <div id="mDevice" class="metric">-</div>
-          <div id="mCollected" class="muted"></div>
+        <div class="panel span-3 metricCard">
+          <div class="metricLabel">Device</div>
+          <div id="mDevice" class="metricValue">-</div>
+          <div id="mCollected" class="metricSub"></div>
         </div>
-        <div class="card span-4">
-          <div class="label">Endpoint Captures</div>
-          <div id="mEndpoints" class="metric">0</div>
-          <div id="mEndpointBreakdown" class="muted"></div>
+        <div class="panel span-3 metricCard">
+          <div class="metricLabel">Endpoint Captures</div>
+          <div id="mEndpoints" class="metricValue">0</div>
+          <div id="mEndpointBreakdown" class="metricSub"></div>
         </div>
-        <div class="card span-4">
-          <div class="label">Report Exports</div>
-          <div id="mReports" class="metric">0</div>
-          <div id="mReportBreakdown" class="muted"></div>
+        <div class="panel span-3 metricCard">
+          <div class="metricLabel">Report Exports</div>
+          <div id="mReports" class="metricValue">0</div>
+          <div id="mReportBreakdown" class="metricSub"></div>
+        </div>
+        <div class="panel span-3 metricCard">
+          <div class="metricLabel">High-Level Snapshot</div>
+          <div id="mSnapshot" class="metricValue" style="font-size:18px;">-</div>
+          <div id="mSnapshotSub" class="metricSub"></div>
         </div>
       </div>
 
-      <div class="card span-12" style="margin-bottom:14px;">
-        <h3 style="margin-top:0;">Resolved IDs</h3>
-        <div id="resolvedIds" class="kv"></div>
+      <div class="twoCol">
+        <div class="panel">
+          <h2>Resolved IDs</h2>
+          <div id="resolvedIds" class="kv"></div>
+        </div>
+        <div class="panel">
+          <h2>Device Snapshot</h2>
+          <div id="deviceSnapshot" class="kv"></div>
+          <div id="snapshotTags" class="statline"></div>
+        </div>
       </div>
 
-      <div class="card span-12" style="margin-bottom:14px;">
-        <h3 style="margin-top:0;">Endpoint Captures</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Count</th>
-              <th>URI</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody id="endpointRows"></tbody>
-        </table>
-      </div>
+      <div class="grid" style="margin-top:12px;">
+        <div class="panel span-12">
+          <h2>Endpoint Captures</h2>
+          <div class="toolbar">
+            <input id="endpointSearch" type="search" placeholder="Filter endpoint rows (name, URI, error)">
+            <select id="endpointStatus">
+              <option value="all">All statuses</option>
+              <option value="success">Success only</option>
+              <option value="failed">Failed only</option>
+            </select>
+            <div id="endpointVisible" class="muted"></div>
+          </div>
+          <div class="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 24%;">Name</th>
+                  <th style="width: 10%;">Status</th>
+                  <th style="width: 8%;">Count</th>
+                  <th style="width: 34%;">URI</th>
+                  <th style="width: 24%;">Error</th>
+                </tr>
+              </thead>
+              <tbody id="endpointRows"></tbody>
+            </table>
+          </div>
+        </div>
 
-      <div class="card span-12" style="margin-bottom:14px;">
-        <h3 style="margin-top:0;">Report Exports</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Report</th>
-              <th>Status</th>
-              <th>Rows</th>
-              <th>Filter</th>
-              <th>File</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody id="reportRows"></tbody>
-        </table>
-      </div>
+        <div class="panel span-12">
+          <h2>Report Exports</h2>
+          <div class="toolbar">
+            <input id="reportSearch" type="search" placeholder="Filter reports (name, filter, file, error)">
+            <select id="reportStatus">
+              <option value="all">All statuses</option>
+              <option value="success">Success only</option>
+              <option value="failed">Failed only</option>
+            </select>
+            <div id="reportVisible" class="muted"></div>
+          </div>
+          <div class="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 18%;">Report</th>
+                  <th style="width: 10%;">Status</th>
+                  <th style="width: 8%;">Rows</th>
+                  <th style="width: 25%;">Filter</th>
+                  <th style="width: 19%;">File</th>
+                  <th style="width: 20%;">Error</th>
+                </tr>
+              </thead>
+              <tbody id="reportRows"></tbody>
+            </table>
+          </div>
+        </div>
 
-      <div class="card span-12">
-        <h3 style="margin-top:0;">Raw Payloads (from summary JSON)</h3>
-        <div id="rawPayloads"></div>
+        <div class="panel span-12">
+          <h2>Notes</h2>
+          <ul id="notes" class="noteList"></ul>
+        </div>
+
+        <div class="panel span-12">
+          <h2>Raw Payloads</h2>
+          <div class="toolbar">
+            <input id="rawSearch" type="search" placeholder="Filter raw payload panels by endpoint name">
+            <select id="rawStatus">
+              <option value="all">All statuses</option>
+              <option value="success">Success only</option>
+              <option value="failed">Failed only</option>
+            </select>
+            <div id="rawVisible" class="muted"></div>
+          </div>
+          <div id="rawPayloads"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -206,6 +388,15 @@
     const drop = document.getElementById('drop');
     const fileNameEl = document.getElementById('fileName');
     const content = document.getElementById('content');
+
+    const endpointSearch = document.getElementById('endpointSearch');
+    const endpointStatus = document.getElementById('endpointStatus');
+    const reportSearch = document.getElementById('reportSearch');
+    const reportStatus = document.getElementById('reportStatus');
+    const rawSearch = document.getElementById('rawSearch');
+    const rawStatus = document.getElementById('rawStatus');
+
+    let currentData = null;
 
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files && e.target.files[0];
@@ -225,83 +416,245 @@
       if (file) loadFile(file);
     });
 
+    [endpointSearch, endpointStatus, reportSearch, reportStatus, rawSearch, rawStatus].forEach(el => {
+      el.addEventListener('input', () => { if (currentData) render(currentData); });
+      el.addEventListener('change', () => { if (currentData) render(currentData); });
+    });
+
     function esc(s) {
       return String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    }
+
+    function truncate(s, n) {
+      s = String(s ?? '');
+      return s.length > n ? s.slice(0, n - 1) + '…' : s;
+    }
+
+    function badge(success, text) {
+      if (success === true) return '<span class="pill ok">Success</span>';
+      if (success === false) return '<span class="pill bad">Failed</span>';
+      return `<span class="pill warn">${esc(text || 'N/A')}</span>`;
     }
 
     async function loadFile(file) {
       fileNameEl.textContent = `Loaded: ${file.name}`;
       try {
         const text = await file.text();
-        const data = JSON.parse(text);
-        render(data);
+        currentData = JSON.parse(text);
+        render(currentData);
       } catch (err) {
         alert(`Failed to load JSON: ${err.message}`);
       }
     }
 
-    function pill(ok, warnText) {
-      if (ok === true) return '<span class="pill ok">Success</span>';
-      if (ok === false) return '<span class="pill bad">Failed</span>';
-      return `<span class="pill warn">${esc(warnText || 'N/A')}</span>`;
+    function findCapture(captures, namePart) {
+      return captures.find(c => (c?.name || '').toLowerCase().includes(namePart.toLowerCase()) && c && c.success);
+    }
+
+    function extractSnapshot(captures) {
+      const selected = findCapture(captures, 'selected inventory fields');
+      const beta = findCapture(captures, 'managedDevice (beta)');
+      const hw = findCapture(captures, 'hardwareInformation');
+
+      const s = {};
+      const from = (obj, key) => obj && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : null;
+      const d1 = selected?.data || {};
+      const d2 = beta?.data || {};
+      const hwInfo = hw?.data?.hardwareInformation || {};
+
+      s.deviceName = from(d1, 'deviceName') || from(d2, 'deviceName');
+      s.os = [from(d1, 'operatingSystem') || from(d2, 'operatingSystem'), from(d1, 'osVersion') || from(d2, 'osVersion')].filter(Boolean).join(' ');
+      s.manufacturer = from(d1, 'manufacturer') || from(d2, 'manufacturer');
+      s.model = from(d1, 'model') || from(d2, 'model');
+      s.serialNumber = from(d1, 'serialNumber') || from(d2, 'serialNumber');
+      s.userPrincipalName = from(d1, 'userPrincipalName') || from(d2, 'userPrincipalName');
+      s.complianceState = from(d1, 'complianceState') || from(d2, 'complianceState');
+      s.managementState = from(d1, 'managementState') || from(d2, 'managementState');
+      s.ownerType = from(d1, 'ownerType') || from(d2, 'ownerType');
+      s.lastSyncDateTime = from(d1, 'lastSyncDateTime') || from(d2, 'lastSyncDateTime');
+      s.enrolledDateTime = from(d1, 'enrolledDateTime') || from(d2, 'enrolledDateTime');
+      s.wifiMac = from(d1, 'wiFiMacAddress') || from(hwInfo, 'wifiMac');
+      s.ethernetMac = from(d1, 'ethernetMacAddress');
+      s.ipv4 = from(hwInfo, 'ipAddressV4');
+      s.subnet = from(hwInfo, 'subnetAddress');
+      s.wiredIPv4Addresses = from(hwInfo, 'wiredIPv4Addresses');
+      s.osBuildNumber = from(hwInfo, 'osBuildNumber');
+      s.biosVersion = from(hwInfo, 'systemManagementBIOSVersion');
+      s.tpmVersion = from(hwInfo, 'tpmVersion');
+      return s;
+    }
+
+    function normalize(arr) { return Array.isArray(arr) ? arr : []; }
+
+    function matchesStatus(item, value) {
+      if (value === 'all') return true;
+      if (value === 'success') return !!item.success;
+      if (value === 'failed') return item.success === false;
+      return true;
+    }
+
+    function matchesText(item, text, fields) {
+      if (!text) return true;
+      const q = text.toLowerCase();
+      return fields.some(f => String(item?.[f] ?? '').toLowerCase().includes(q));
     }
 
     function render(data) {
       content.classList.remove('hidden');
 
-      const captures = Array.isArray(data.endpointCaptures) ? data.endpointCaptures : [];
-      const reports = Array.isArray(data.reportExports) ? data.reportExports : [];
+      const captures = normalize(data.endpointCaptures);
+      const reports = normalize(data.reportExports);
       const capOk = captures.filter(c => c && c.success).length;
       const repOk = reports.filter(r => r && r.success).length;
+      const snapshot = extractSnapshot(captures);
 
-      document.getElementById('mDevice').textContent = data.deviceName || '(unknown)';
+      document.getElementById('mDevice').textContent = data.deviceName || snapshot.deviceName || '(unknown)';
       document.getElementById('mCollected').textContent = data.collectedAt || '';
       document.getElementById('mEndpoints').textContent = String(captures.length);
       document.getElementById('mEndpointBreakdown').textContent = `${capOk} succeeded, ${captures.length - capOk} failed`;
       document.getElementById('mReports').textContent = String(reports.length);
       document.getElementById('mReportBreakdown').textContent = reports.length ? `${repOk} succeeded, ${reports.length - repOk} failed` : 'No reports exported';
+      document.getElementById('mSnapshot').textContent = snapshot.os || 'No inventory summary';
+      document.getElementById('mSnapshotSub').textContent = [snapshot.manufacturer, snapshot.model].filter(Boolean).join(' ') || '';
 
-      const resolved = data.resolvedIds || {};
       const resolvedEl = document.getElementById('resolvedIds');
       resolvedEl.innerHTML = '';
+      const resolved = data.resolvedIds || {};
       Object.keys(resolved).forEach(k => {
         const v = resolved[k] == null || resolved[k] === '' ? 'NOT RESOLVED' : resolved[k];
-        resolvedEl.insertAdjacentHTML('beforeend', `<div>${esc(k)}</div><div><code>${esc(v)}</code></div>`);
+        resolvedEl.insertAdjacentHTML('beforeend', `<div class="k">${esc(k)}</div><div><code class="inline">${esc(v)}</code></div>`);
       });
 
-      const endpointRows = document.getElementById('endpointRows');
-      endpointRows.innerHTML = captures.map(c => `
-        <tr>
-          <td>${esc(c.name)}</td>
-          <td>${pill(c.success)}</td>
-          <td>${esc(c.count ?? '')}</td>
-          <td><code>${esc(c.uri)}</code></td>
-          <td>${c.error ? `<code>${esc(c.error)}</code>` : ''}</td>
-        </tr>
-      `).join('');
+      const snapshotEl = document.getElementById('deviceSnapshot');
+      snapshotEl.innerHTML = '';
+      const snapshotFields = [
+        ['Device Name', snapshot.deviceName],
+        ['Manufacturer', snapshot.manufacturer],
+        ['Model', snapshot.model],
+        ['Serial', snapshot.serialNumber],
+        ['Primary UPN', snapshot.userPrincipalName],
+        ['OS', snapshot.os],
+        ['OS Build', snapshot.osBuildNumber],
+        ['Management State', snapshot.managementState],
+        ['Compliance State', snapshot.complianceState],
+        ['Owner Type', snapshot.ownerType],
+        ['IPv4', snapshot.ipv4],
+        ['Subnet', snapshot.subnet],
+        ['Wi-Fi MAC', snapshot.wifiMac],
+        ['Ethernet MAC', snapshot.ethernetMac],
+        ['Last Sync', snapshot.lastSyncDateTime],
+        ['Enrolled', snapshot.enrolledDateTime]
+      ];
+      snapshotFields.forEach(([k, v]) => {
+        snapshotEl.insertAdjacentHTML('beforeend', `<div class="k">${esc(k)}</div><div>${v ? `<code class="inline">${esc(v)}</code>` : '<span class="muted">N/A</span>'}</div>`);
+      });
 
+      const tags = document.getElementById('snapshotTags');
+      tags.innerHTML = '';
+      ['wiredIPv4Addresses', 'biosVersion', 'tpmVersion'].forEach(key => {
+        const val = snapshot[key];
+        if (!val || (Array.isArray(val) && !val.length)) return;
+        const text = Array.isArray(val) ? `${key}: ${val.join(', ')}` : `${key}: ${val}`;
+        tags.insertAdjacentHTML('beforeend', `<span class="chip">${esc(text)}</span>`);
+      });
+
+      const epText = endpointSearch.value.trim();
+      const epStatus = endpointStatus.value;
+      const epFiltered = captures.filter(c =>
+        matchesStatus(c, epStatus) &&
+        matchesText(c, epText, ['name', 'uri', 'error'])
+      );
+
+      document.getElementById('endpointVisible').textContent = `${epFiltered.length} of ${captures.length} shown`;
+      const endpointRows = document.getElementById('endpointRows');
+      endpointRows.innerHTML = epFiltered.length ? epFiltered.map(c => `
+        <tr>
+          <td>
+            ${esc(c.name)}
+            ${String(c.name || '').includes('(beta)') ? '<span class="tag">beta</span>' : ''}
+          </td>
+          <td>${badge(c.success)}</td>
+          <td>${esc(c.count ?? '')}</td>
+          <td><code class="inline">${esc(truncate(c.uri, 160))}</code></td>
+          <td>${c.error ? `<code class="inline">${esc(truncate(c.error, 180))}</code>` : '<span class="muted">—</span>'}</td>
+        </tr>
+      `).join('') : '<tr><td colspan="5" class="muted">No endpoint rows match the current filter.</td></tr>';
+
+      const rpText = reportSearch.value.trim();
+      const rpStatus = reportStatus.value;
+      const rpFiltered = reports.filter(r =>
+        matchesStatus(r, rpStatus) &&
+        matchesText(r, rpText, ['reportName', 'filter', 'filePath', 'error'])
+      );
+      document.getElementById('reportVisible').textContent = `${rpFiltered.length} of ${reports.length} shown`;
       const reportRows = document.getElementById('reportRows');
-      reportRows.innerHTML = reports.length ? reports.map(r => `
+      reportRows.innerHTML = reports.length ? (rpFiltered.length ? rpFiltered.map(r => `
         <tr>
           <td>${esc(r.reportName)}</td>
-          <td>${pill(r.success)}</td>
+          <td>${badge(r.success)}</td>
           <td>${esc(r.rowCount ?? '')}</td>
-          <td><code>${esc(r.filter || '')}</code></td>
-          <td>${r.filePath ? `<code>${esc(r.filePath)}</code>` : ''}</td>
-          <td>${r.error ? `<code>${esc(r.error)}</code>` : ''}</td>
+          <td><code class="inline">${esc(truncate(r.filter || '', 120))}</code></td>
+          <td>${r.filePath ? `<code class="inline">${esc(truncate(r.filePath, 120))}</code>` : '<span class="muted">—</span>'}</td>
+          <td>${r.error ? `<code class="inline">${esc(truncate(r.error, 150))}</code>` : '<span class="muted">—</span>'}</td>
         </tr>
-      `).join('') : '<tr><td colspan="6" class="muted">No report export results in this file.</td></tr>';
+      `).join('') : '<tr><td colspan="6" class="muted">No report rows match the current filter.</td></tr>') : '<tr><td colspan="6" class="muted">No report export results in this file.</td></tr>';
 
-      const raw = document.getElementById('rawPayloads');
-      raw.innerHTML = '';
-      captures.forEach((c, idx) => {
-        const payload = c && Object.prototype.hasOwnProperty.call(c, 'data') ? c.data : null;
-        raw.insertAdjacentHTML('beforeend', `
-          <details ${idx < 2 ? 'open' : ''}>
-            <summary>${esc(c.name)} ${pill(c.success)}</summary>
-            <pre>${esc(JSON.stringify(payload, null, 2))}</pre>
-          </details>
-        `);
+      const notesEl = document.getElementById('notes');
+      const notes = normalize(data.notes);
+      notesEl.innerHTML = notes.length ? notes.map(n => `<li>${esc(n)}</li>`).join('') : '<li>No notes in summary.</li>';
+
+      const rawText = rawSearch.value.trim().toLowerCase();
+      const rawStatusValue = rawStatus.value;
+      const rawEl = document.getElementById('rawPayloads');
+      rawEl.innerHTML = '';
+
+      const rawFiltered = captures.filter(c => {
+        const statusMatch = matchesStatus(c, rawStatusValue);
+        const textMatch = !rawText || String(c.name || '').toLowerCase().includes(rawText);
+        return statusMatch && textMatch;
+      });
+      document.getElementById('rawVisible').textContent = `${rawFiltered.length} of ${captures.length} shown`;
+
+      if (!rawFiltered.length) {
+        rawEl.innerHTML = '<div class="empty">No raw payload panels match the current filter.</div>';
+      } else {
+        rawFiltered.forEach((c, idx) => {
+          const payload = Object.prototype.hasOwnProperty.call(c, 'data') ? c.data : null;
+          const json = JSON.stringify(payload, null, 2);
+          const id = `raw_${idx}`;
+          rawEl.insertAdjacentHTML('beforeend', `
+            <details ${idx < 2 ? 'open' : ''}>
+              <summary>
+                <div class="summaryLeft">
+                  ${badge(c.success)}
+                  <span class="summaryText">${esc(c.name)}</span>
+                </div>
+                <span class="muted">${esc(c.count ?? '')} item(s)</span>
+              </summary>
+              <div class="rawTools">
+                <button type="button" data-copy="${id}">Copy JSON</button>
+                <span class="muted">${esc(c.uri || '')}</span>
+              </div>
+              <pre id="${id}">${esc(json)}</pre>
+            </details>
+          `);
+        });
+      }
+
+      rawEl.querySelectorAll('button[data-copy]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const pre = document.getElementById(btn.getAttribute('data-copy'));
+          if (!pre) return;
+          try {
+            await navigator.clipboard.writeText(pre.textContent || '');
+            const original = btn.textContent;
+            btn.textContent = 'Copied';
+            setTimeout(() => { btn.textContent = original; }, 900);
+          } catch (_) {
+            btn.textContent = 'Copy failed';
+            setTimeout(() => { btn.textContent = 'Copy JSON'; }, 900);
+          }
+        });
       });
     }
   </script>
