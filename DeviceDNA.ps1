@@ -10,6 +10,8 @@
     Target computer name (default: localhost)
 .PARAMETER OutputPath
     Output directory for the HTML report (default: current directory)
+.PARAMETER Credential
+    Optional credentials to use for remote collection (e.g., domain credentials).
 .PARAMETER AutoOpen
     Automatically open the generated report in default browser
 .PARAMETER SkipGPUpdate
@@ -24,6 +26,9 @@ param(
 
     [Parameter()]
     [string]$OutputPath = ".",
+
+    [Parameter()]
+    [pscredential]$Credential,
 
     [Parameter()]
     [switch]$AutoOpen,
@@ -82,6 +87,14 @@ $PSScriptRoot = Split-Path -Parent -Path $MyInvocation.MyCommand.Definition
 
 # Main execution
 try {
+    # Stash credential for modules and set default credentials for remoting calls
+    $script:Credential = $Credential
+    if ($script:Credential) {
+        $PSDefaultParameterValues['Invoke-Command:Credential'] = $script:Credential
+        $PSDefaultParameterValues['New-CimSession:Credential'] = $script:Credential
+        $PSDefaultParameterValues['Get-WmiObject:Credential'] = $script:Credential
+    }
+
     $result = Invoke-DeviceDNACollection
 
     if (-not $result.Success) {

@@ -33,6 +33,7 @@ $script:RequiredGraphScopes = @(
 
 # Target configuration (set during orchestration)
 $script:TargetComputer = $null
+$script:Credential = $null
 
 # Group name cache for resolving group IDs to display names
 $script:GroupNameCache = @{}
